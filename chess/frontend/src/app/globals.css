@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: theme("colors.surface.DEFAULT");
+  color: #e7e9ee;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Malayalam text should use the Malayalam font stack for proper rendering. */
+.font-ml {
+  font-family: theme("fontFamily.malayalam");
+  line-height: 1.8;
+}
+
+@layer components {
+  .container-px {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+  .card {
+    @apply rounded-2xl border border-surface-border bg-surface-card p-6 shadow-lg;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-2.5
+           font-medium text-white transition hover:bg-brand-dark focus:outline-none
+           focus:ring-2 focus:ring-brand-light disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border
+           border-surface-border px-5 py-2.5 font-medium text-gray-200 transition
+           hover:border-brand hover:text-white;
+  }
+}
