@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.core.logging import configure_logging, get_logger
 from app.core.security import hash_password
+from app.data.puzzle_seed_data import PUZZLES
 from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
 from app.models.opening import OpeningLesson
@@ -61,24 +62,23 @@ SEED_OPENINGS = [
     ),
 ]
 
-# Minimal demo puzzles (FEN + solution UCI line). themes are lichess-style.
-SEED_PUZZLES = [
-    Puzzle(
-        fen="r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
-        moves=["d2d3", "f8c5", "c2c3", "d7d6"],
-        rating=900,
-        themes=["opening", "development"],
-        is_daily=True,
-        explanation_ml="കരുക്കളെ വികസിപ്പിച്ച് കേന്ദ്രം ശക്തമാക്കുക.",
-    ),
-    Puzzle(
-        fen="6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1",
-        moves=["e1e8"],
-        rating=1100,
-        themes=["backRankMate", "mateIn1"],
-        explanation_ml="തേര് e8-ലേക്ക് നീക്കി ബാക്ക്-റാങ്ക് മേറ്റ് നൽകുന്നു.",
-    ),
-]
+def _build_seed_puzzles() -> list[Puzzle]:
+    puzzles = []
+    for i, p in enumerate(PUZZLES):
+        puzzles.append(
+            Puzzle(
+                fen=p["fen"],
+                moves=p["moves"],
+                rating=p["rating"],
+                themes=p["themes"],
+                hints=p["hints"],
+                is_daily=(i == 0),
+            )
+        )
+    return puzzles
+
+
+SEED_PUZZLES = _build_seed_puzzles()
 
 
 async def init_models() -> None:

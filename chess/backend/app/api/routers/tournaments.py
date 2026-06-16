@@ -159,6 +159,18 @@ async def create_tournament(
     return _tournament_out(t, t.participants)
 
 
+@router.get("/join/{token}/preview")
+async def preview_by_token(token: str, db: AsyncSession = Depends(get_db)):
+    """Public preview of a tournament by invite token — no auth required."""
+    t = (
+        await db.execute(select(Tournament).where(Tournament.invite_token == token))
+    ).scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "Invalid invite link.")
+    await db.refresh(t, ["participants", "organiser"])
+    return _tournament_out(t, t.participants)
+
+
 @router.get("/join/{token}")
 async def join_by_token(
     token: str,

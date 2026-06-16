@@ -195,6 +195,37 @@ export interface TokenPair {
   token_type: string;
 }
 
+export interface PuzzleOut {
+  id: number;
+  fen: string;
+  rating: number;
+  themes: string[];
+  is_daily: boolean;
+  solver_move_count: number;
+}
+
+export interface PuzzleSolveResponse {
+  correct: boolean;
+  solution: string[];
+  new_rating: number;
+  streak: number;
+}
+
+export interface HintOut {
+  step: number;
+  move: string;
+  pros: string;
+  cons: string;
+  hints_used_today: number;
+  hints_remaining_today: number | null;
+}
+
+export interface CheckMoveResponse {
+  correct: boolean;
+  opponent_reply: string | null;
+  is_last: boolean;
+}
+
 // ---- Endpoints ----------------------------------------------------------
 
 export const api = {
@@ -285,6 +316,9 @@ export const api = {
   joinByToken: (token: string) =>
     request<{ tournament_id: number; slug: string }>(`/tournaments/join/${token}`),
 
+  previewByToken: (token: string) =>
+    request<TournamentOut>(`/tournaments/join/${token}/preview`),
+
   openRegistration: (id: number) =>
     request<{ status: string }>(`/tournaments/${id}/open-registration`, { method: "POST" }),
 
@@ -302,4 +336,29 @@ export const api = {
 
   myRating: () =>
     request<PlayerRatingOut>("/tournaments/ratings/me"),
+
+  // ---- Puzzles -------------------------------------------------------------
+
+  dailyPuzzle: () => request<PuzzleOut>("/puzzles/daily"),
+
+  randomPuzzle: (theme?: string) =>
+    request<PuzzleOut>(`/puzzles/random${theme ? `?theme=${theme}` : ""}`),
+
+  nextPuzzle: (theme?: string) =>
+    request<PuzzleOut>(`/puzzles/next${theme ? `?theme=${theme}` : ""}`),
+
+  puzzleHint: (puzzleId: number, step: number) =>
+    request<HintOut>(`/puzzles/${puzzleId}/hint?step=${step}`),
+
+  checkPuzzleMove: (puzzleId: number, step: number, move: string) =>
+    request<CheckMoveResponse>(`/puzzles/${puzzleId}/check`, {
+      method: "POST",
+      body: JSON.stringify({ step, move }),
+    }),
+
+  solvePuzzle: (puzzleId: number, moves: string[]) =>
+    request<PuzzleSolveResponse>("/puzzles/solve", {
+      method: "POST",
+      body: JSON.stringify({ puzzle_id: puzzleId, moves }),
+    }),
 };

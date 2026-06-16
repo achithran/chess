@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # ---- Limits ----
     RATE_LIMIT_PER_MINUTE: int = 60
     FREE_PLAN_DAILY_ANALYSES: int = 10
+    FREE_PLAN_DAILY_HINTS: int = 3
 
     @property
     def cors_origins(self) -> list[str]:

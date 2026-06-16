@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, PKMixin, TimestampMixin
@@ -22,6 +22,8 @@ class Puzzle(Base, PKMixin, TimestampMixin):
     is_daily: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     explanation_ml: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
+    # One entry per solver move: {"move": "e2e4", "pros": "...", "cons": "..."}
+    hints: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
 
 
 class PuzzleAttempt(Base, PKMixin, TimestampMixin):
