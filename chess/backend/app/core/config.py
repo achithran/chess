@@ -42,10 +42,28 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""
 
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors(cls, v: object) -> str:
+        """Accept plain string, JSON array, or list — always return comma-separated str."""
+        if isinstance(v, list):
+            return ",".join(str(i).strip().strip('"').strip("'") for i in v)
+        if isinstance(v, str):
+            v = v.strip().strip('"').strip("'")
+            # Handle JSON array string: '["http://...","http://..."]'
+            if v.startswith("["):
+                import json
+                try:
+                    items = json.loads(v)
+                    return ",".join(str(i).strip() for i in items)
+                except Exception:
+                    pass
+        return str(v) if v is not None else ""
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def _fix_db_driver(cls, v: str) -> str:
-        """Railway Postgres gives postgresql:// — asyncpg needs postgresql+asyncpg://."""
+        """Railway/Supabase gives postgresql:// — asyncpg needs postgresql+asyncpg://."""
         if isinstance(v, str) and v.startswith("postgresql://"):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
