@@ -5,6 +5,8 @@ singleton ``settings`` everywhere instead of reading ``os.environ`` directly.
 """
 from __future__ import annotations
 
+import json
+import os
 from functools import lru_cache
 
 from pydantic import field_validator, model_validator
@@ -26,10 +28,6 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours — enough for a full session
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    # Comma-separated list of allowed origins (parsed via the cors_origins
-    # property). Kept as a plain str so pydantic-settings does not try to
-    # JSON-decode the env value.
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000"
 
     # ---- Database ----
     DATABASE_URL: str = (
@@ -41,24 +39,6 @@ class Settings(BaseSettings):
     # Celery URLs default to REDIS_URL if not set explicitly
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""
-
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    @classmethod
-    def _parse_cors(cls, v: object) -> str:
-        """Accept plain string, JSON array, or list — always return comma-separated str."""
-        if isinstance(v, list):
-            return ",".join(str(i).strip().strip('"').strip("'") for i in v)
-        if isinstance(v, str):
-            v = v.strip().strip('"').strip("'")
-            # Handle JSON array string: '["http://...","http://..."]'
-            if v.startswith("["):
-                import json
-                try:
-                    items = json.loads(v)
-                    return ",".join(str(i).strip() for i in items)
-                except Exception:
-                    pass
-        return str(v) if v is not None else ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -121,8 +101,18 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        """Allowed CORS origins as a list, from the comma-separated setting."""
-        return [o.strip() for o in self.BACKEND_CORS_ORIGINS.split(",") if o.strip()]
+        """Read BACKEND_CORS_ORIGINS directly from os.environ to avoid pydantic-settings
+        JSON-parse failures on plain comma-separated strings."""
+        raw = os.environ.get("BACKEND_CORS_ORIGINS", "http://localhost:3000").strip()
+        # Strip surrounding quotes that some platforms add
+        raw = raw.strip('"').strip("'")
+        # Handle JSON array format: ["url1","url2"]
+        if raw.startswith("["):
+            try:
+                return [str(i).strip() for i in json.loads(raw)]
+            except Exception:
+                pass
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
     @property
     def is_production(self) -> bool:
