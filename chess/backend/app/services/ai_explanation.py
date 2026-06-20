@@ -79,10 +79,95 @@ _PIECE_EN = {
     chess.KING:   "king",
 }
 
+_PIECE_VALUES = {
+    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
+}
+
+_VALID_STEP_LABELS = {"move", "tactic", "threat", "strategy", "plan", "warning"}
+
 CLASSIFICATION_EN = {
     "best": "best move", "excellent": "excellent move", "good": "good move",
     "inaccuracy": "inaccuracy", "mistake": "mistake", "blunder": "blunder",
 }
+
+# ── Tactical analysis helpers ─────────────────────────────────────────────────
+
+def _game_phase(board: chess.Board) -> str:
+    total = sum(
+        _PIECE_VALUES.get(p.piece_type, 0)
+        for sq in chess.SQUARES
+        if (p := board.piece_at(sq)) and p.piece_type != chess.KING
+    )
+    if board.fullmove_number <= 10 and total >= 60:
+        return "opening"
+    if total <= 20:
+        return "endgame"
+    return "middlegame"
+
+
+def _detect_tactics(board: chess.Board, move: chess.Move) -> list[str]:
+    """Return natural-language descriptions of tactical patterns this move creates."""
+    piece = board.piece_at(move.from_square)
+    if not piece:
+        return []
+    tactics: list[str] = []
+    opp = not piece.color
+
+    b2 = board.copy()
+    b2.push(move)
+    to_sq = move.to_square
+
+    # Check / discovered check
+    if b2.is_check():
+        opp_king_sq = b2.king(opp)
+        if opp_king_sq is not None and to_sq not in b2.attackers(piece.color, opp_king_sq):
+            tactics.append("discovered check — moving reveals a hidden attacking piece that gives check")
+        else:
+            tactics.append("check — king is now in check")
+
+    # Fork: landing square attacks 2+ opponent pieces simultaneously
+    opp_targets = [
+        s for s in b2.attacks(to_sq)
+        if (p := b2.piece_at(s)) and p.color == opp
+    ]
+    if len(opp_targets) >= 2:
+        target_desc = " and ".join(
+            f"{_PIECE_EN.get(b2.piece_at(s).piece_type, 'piece')} on {chess.square_name(s)}"
+            for s in opp_targets[:3]
+        )
+        tactics.append(
+            f"fork — {_PIECE_EN.get(piece.piece_type, 'piece')} on {chess.square_name(to_sq)}"
+            f" attacks {target_desc} simultaneously"
+        )
+
+    # Pin: opponent piece newly pinned to their king after this move
+    if b2.king(opp) is not None:
+        for sq in chess.SQUARES:
+            p2 = b2.piece_at(sq)
+            if p2 and p2.color == opp and p2.piece_type != chess.KING:
+                if b2.is_pinned(opp, sq) and not board.is_pinned(opp, sq):
+                    pname = _PIECE_EN.get(p2.piece_type, "piece")
+                    tactics.append(
+                        f"pin — opponent's {pname} on {chess.square_name(sq)}"
+                        f" is now pinned to their king and cannot move freely"
+                    )
+                    break
+
+    # Winning capture: take a more valuable piece
+    if board.is_capture(move):
+        cap = board.piece_at(move.to_square)
+        if cap:
+            mv = _PIECE_VALUES.get(piece.piece_type, 0)
+            cv = _PIECE_VALUES.get(cap.piece_type, 0)
+            if cv > mv:
+                tactics.append(
+                    f"winning capture — {_PIECE_EN.get(piece.piece_type, 'piece')} (worth {mv})"
+                    f" takes {_PIECE_EN.get(cap.piece_type, 'piece')} (worth {cv}), gaining {cv - mv} pawns of material"
+                )
+
+    return tactics
+
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -126,13 +211,13 @@ STRICT RULES:
 1. Malayalam Unicode script for all grammar and sentence structure.
 2. These words MUST appear in English exactly — NEVER translate them:
    Pieces: King, Queen, Knight, Bishop, Rook, Pawn
-   Actions: push, capture, move, attack, threaten, check, checkmate, castle, develop, control, protect, fork, pin
+   Actions: push, capture, move, attack, threaten, check, checkmate, castle, develop, control, protect, fork, pin, skewer
    Squares: e4, d5, f3, c5 etc.
-   Words: center, advantage, opponent, safe, best, position
+   Words: center, advantage, opponent, safe, best, position, fork, pin, check, discovered check
 
 CORRECT examples (copy this style):
   "നിങ്ങളുടെ Pawn c7-ൽ നിന്ന് c5-ലേക്ക് push ചെയ്തു."
-  "ഇത് ഇപ്പോൾ opponent-ന്റെ Knight-നെ threaten ചെയ്യുന്നു."
+  "ഇത് ഒരു Fork ആണ് — Knight ഒരേ സമയം Queen-നെയും Rook-നെയും attack ചെയ്യുന്നു!"
   "Center control ഉണ്ടാകുന്നു — ഇത് നിങ്ങൾക്ക് വലിയ advantage ആണ്."
   "ഇനി Knight develop ചെയ്യൂ — position strong ആകും."
 
@@ -141,15 +226,24 @@ WRONG (never do this):
   "...ആക്രമിക്കുന്നു" ← WRONG, use "attack ചെയ്യുന്നു"
   "...നൈറ്റ്..." ← WRONG, use "Knight"
 
-Generate exactly 4 steps. Each step has one short sentence + board arrows/squares.
+Generate exactly 5 steps with these LABELS:
+  Step 1: label "move"     — which piece moved where. Green arrow.
+  Step 2: label "tactic"   — if TACTICS DETECTED are listed: name the tactic (Fork/Pin/Check/Discovered Check) and explain why it works. Red/orange arrows. If no tactic listed, label "threat" and explain the main threat.
+  Step 3: label "threat"   — what opponent must respond to. Red arrows.
+  Step 4: label "strategy" — positional gain: center control, piece activity, King safety. Purple/blue.
+  Step 5: label "plan"     — player's next 2-3 move idea. Yellow squares.
 
 JSON format:
 [
-  {"text": "Malayalam sentence with English piece names.", "arrows": [["from","to","color"]], "squares": [["sq","color"]]},
-  ...
+  {"label": "move",     "text": "Malayalam sentence.", "arrows": [["from","to","color"]], "squares": [["sq","color"]]},
+  {"label": "tactic",   "text": "...", "arrows": [...], "squares": [...]},
+  {"label": "threat",   "text": "...", "arrows": [...], "squares": [...]},
+  {"label": "strategy", "text": "...", "arrows": [...], "squares": [...]},
+  {"label": "plan",     "text": "...", "arrows": [...], "squares": [...]}
 ]
 
-Colors: green=good move, red=threat/attack, purple=key square, yellow=watch, blue=protected, orange=opponent trouble
+Valid labels: move | tactic | threat | strategy | plan | warning
+Colors: green=good move, red=threat/attack, purple=key square, yellow=watch/plan, blue=protected, orange=opponent trouble
 Squares: a1–h8 only. Output ONLY the JSON array."""
 
 _GURU_SYSTEM_ML = f"""\
@@ -161,30 +255,30 @@ OUTPUT ONLY a valid JSON array — NO markdown, NO text outside the JSON.
 
 CORRECT examples:
   "നിങ്ങളുടെ Knight e2-ൽ നിന്ന് f4-ലേക്ക് move ചെയ്തു."
-  "ഇത് opponent-ന്റെ Pawn-നെ attack ചെയ്യുന്നു."
+  "ഇത് ഒരു Fork ആണ്! Knight ഒരേ സമയം Queen-നെയും Rook-നെയും attack ചെയ്യുന്നു."
   "ഇനി Rook develop ചെയ്യൂ — safe ആകും."
 
 WRONG: "...നൈറ്റ്...", "...പ്യാദ...", "...ആക്രമിക്കുന്നു...", "...നീക്കി..."
 
-Generate exactly 4 steps. Each step = 1 short sentence + board annotation.
+Generate exactly 4 steps with these labels and purposes:
+  Step 1 [label "move"]     – ഏത് piece ഏത് square-ൽ നിന്ന് ഏത് square-ലേക്ക് move ചെയ്തു? Green arrow.
+  Step 2 [label "tactic" or "threat"] – TACTICS DETECTED ഉണ്ടെങ്കിൽ: tactic-ന്റെ name (Fork/Pin/Check) ഉൾപ്പെടുത്തി ലളിതമായ Malayalam-ൽ explain ചെയ്യൂ. ഇല്ലെങ്കിൽ label "threat": ഇത് എന്ത് threaten ചെയ്യുന്നു? Red arrow.
+  Step 3 [label "strategy"] – ഇത് എന്ത് protect ചെയ്യുന്നു / control ചെയ്യുന്നു? Purple/blue.
+  Step 4 [label "plan"]     – ഇനി നിങ്ങൾ എന്ത് ചെയ്യണം? Yellow squares.
 
 REQUIRED JSON format:
 [
   {{
+    "label": "move",
     "text": "ഒരു ചെറിയ Malayalam വാക്യം — കുട്ടിക്ക് മനസ്സിലാകുന്ന ഭാഷ.",
     "arrows": [["from_sq", "to_sq", "color"]],
     "squares": [["sq", "color"]]
   }}
 ]
 
-ALLOWED COLORS: green (നിങ്ങളുടെ move / നല്ലത്), red (അപകടം / threaten), purple (പ്രധാന square), yellow (ശ്രദ്ധിക്കൂ), blue (protected), orange (opponent-ന്റെ കഷ്ടം)
+Valid labels: move | tactic | threat | strategy | plan | warning
+ALLOWED COLORS: green (നിങ്ങളുടെ move / നല്ലത്), red (അപകടം / threaten), purple (പ്രധാന square), yellow (ശ്രദ്ധിക്കൂ / plan), blue (protected), orange (opponent-ന്റെ കഷ്ടം)
 VALID SQUARES: a1-h8 only. Never invent squares.
-
-STEP GUIDE:
-  Step 1 – ഏത് piece ഏത് square-ൽ നിന്ന് ഏത് square-ലേക്ക് move ചെയ്തു? Green arrow.
-  Step 2 – ഇപ്പോൾ ഇത് എന്ത് threaten ചെയ്യുന്നു? Red arrow.
-  Step 3 – ഇത് എന്ത് protect ചെയ്യുന്നു / control ചെയ്യുന്നു? Purple/blue.
-  Step 4 – ഇനി നിങ്ങൾ എന്ത് ചെയ്യണം? Yellow squares.
 
 RULES:
   • Every step MUST have ≥1 arrow OR ≥1 square.
@@ -197,25 +291,27 @@ You are a friendly chess teacher explaining a move to a complete beginner (like 
 
 OUTPUT ONLY a valid JSON array — NO markdown, NO text outside the JSON.
 
-Generate exactly 4 steps. Use the SIMPLEST possible words. Avoid ALL chess jargon.
+Generate exactly 4 steps. Use the SIMPLEST possible words. If a TACTIC is listed in the position info, explain it simply.
 
 REQUIRED JSON format:
 [
   {{
+    "label": "move",
     "text": "1 sentence in LANG — very simple, like talking to a child.",
     "arrows": [["from_sq", "to_sq", "color"]],
     "squares": [["sq", "color"]]
   }}
 ]
 
-ALLOWED COLORS: green (your piece moving / good), red (danger / threat), purple (important square), yellow (watch this), blue (safe / protected), orange (opponent piece in trouble)
+Valid labels: move | tactic | threat | strategy | plan | warning
+ALLOWED COLORS: green (your piece moving / good), red (danger / threat), purple (important square), yellow (watch this / plan), blue (safe / protected), orange (opponent piece in trouble)
 VALID SQUARES: a1-h8 only.
 
 STEP GUIDE:
-  Step 1 – The piece moved from [sq] to [sq]. Green arrow.
-  Step 2 – Now it threatens [something]. Red arrow.
-  Step 3 – It protects / controls [the middle]. Purple/blue.
-  Step 4 – Your best move now is [simple suggestion]. Yellow squares.
+  Step 1 [label "move"]             – The piece moved from [sq] to [sq]. Green arrow.
+  Step 2 [label "tactic" or "threat"] – If TACTICS are listed: explain the tactic simply ("This is a fork!" / "This piece is pinned!"). Use label "tactic". If no tactic, explain the threat. Use label "threat".
+  Step 3 [label "strategy"]         – It protects / controls the middle. Purple/blue.
+  Step 4 [label "plan"]             – Your best next move idea. Yellow squares.
 
 RULES:
   • Every step MUST have ≥1 arrow OR ≥1 square.
@@ -250,10 +346,10 @@ OUTPUT ONLY a valid JSON array — NO markdown fences, NO text outside the JSON.
 
 CORRECT examples — copy this exact style:
   "നിങ്ങളുടെ Pawn c7-ൽ നിന്ന് c5-ലേക്ക് push ചെയ്തു."
-  "ഇത് opponent-ന്റെ Knight-നെ threaten ചെയ്യുന്നു."
+  "ഇത് ഒരു Fork ആണ്! Knight ഒരേ സമയം Queen-നെ d7-ൽ, Rook-നെ f5-ൽ attack ചെയ്യുന്നു."
+  "ഇത് opponent-ന്റെ Bishop-നെ pin ചെയ്യുന്നു — അത് move ചെയ്താൽ King exposed ആകും."
   "Center control ഉണ്ടാകുന്നു — ഇത് വലിയ advantage ആണ്."
-  "ഇനി Knight develop ചെയ്യൂ — position strong ആകും."
-  "Queen e5-ൽ move ചെയ്ത് check കൊടുക്കാൻ പറ്റും."
+  "ഇനി Knight develop ചെയ്ത് f5-ൽ outpost ഉണ്ടാക്കൂ."
 
 WRONG (never generate):
   "...പ്യാദ..." ← use "Pawn"
@@ -262,33 +358,36 @@ WRONG (never generate):
   "...നീക്കി..." ← use "move ചെയ്തു"
   "...ഭീഷണിയുണ്ട്..." ← use "threaten ചെയ്യുന്നു"
 
-Generate exactly 4-5 steps. Each step covers ONE angle of the move with board annotations.
+Generate exactly 5 steps. Each step covers ONE angle of the move with board annotations.
 
 REQUIRED JSON format:
 [
   {{
+    "label": "move",
     "text": "1-2 Malayalam sentences — natural, like a real coach speaking.",
     "arrows": [["from_sq", "to_sq", "color"]],
     "squares": [["sq", "color"]]
   }}
 ]
 
+Valid labels: move | tactic | threat | strategy | plan | warning
+
 ALLOWED COLORS:
   green  = നിങ്ങളുടെ main move, development, നല്ലത്
   red    = threaten / attack line
   purple = strategic square, key control point
-  yellow = ശ്രദ്ധ വേണം, mixed
+  yellow = ശ്രദ്ധ വേണം, plan, next target
   blue   = safely protected piece or square
   orange = opponent-ന്റെ piece കഷ്ടത്തിൽ
 
 VALID SQUARES: a1-h8 only. Never invent squares.
 
-STEP GUIDE:
-  Step 1 – ഏത് piece, എവിടെ നിന്ന്, എവിടേക്ക് move? Green arrow.
-  Step 2 – ഇപ്പോൾ എന്ത് threaten ചെയ്യുന്നു? Red arrows.
-  Step 3 – എന്ത് control / protect ചെയ്യുന്നു? Purple/blue.
-  Step 4 – Strategy: develop, center control, King safety — show it.
-  Step 5 (optional) – Opponent-ന് ഇനി best move എന്താണ്?
+STEP GUIDE (all 5 required):
+  Step 1 [label "move"]     – ഏത് piece, എവിടെ നിന്ന്, എവിടേക്ക് move? Green arrow.
+  Step 2 [label "tactic" or "threat"] – TACTICS DETECTED section-ൽ listed ആണെങ്കിൽ: tactic-ന്റെ English name (Fork / Pin / Check / Discovered Check) ഉൾപ്പെടുത്തി explain ചെയ്യൂ — label "tactic". ഇല്ലെങ്കിൽ: main threat explain ചെയ്ത് — label "threat". Red/orange arrows.
+  Step 3 [label "threat"]   – Opponent-ന് ഇപ്പോൾ respond ചെയ്യേണ്ട immediate danger. Red arrows to the target.
+  Step 4 [label "strategy"] – Positional gain: center control, piece activity, King safety. Purple/blue arrows.
+  Step 5 [label "plan"]     – Player-ന്റെ next 2-3 move idea — concretely show the plan. Yellow squares.
 
 RULES:
   • Every step MUST have ≥1 arrow OR ≥1 square.
@@ -300,34 +399,37 @@ RULES:
 
 OUTPUT ONLY a valid JSON array — NO markdown fences, NO text outside the JSON.
 
-Generate exactly 4-5 steps. Each step covers ONE angle of the move and specifies \
+Generate exactly 5 steps. Each step covers ONE angle of the move and specifies \
 what to draw on the chessboard so the student sees it visually.
 
 REQUIRED JSON format:
 [
   {{
+    "label": "move",
     "text": "1-2 sentences in {name}.",
     "arrows": [["from_sq", "to_sq", "color"]],
     "squares": [["sq", "color"]]
   }}
 ]
 
+Valid labels: move | tactic | threat | strategy | plan | warning
+
 ALLOWED COLORS:
   green  = main move, development, good square for you
   red    = threat to opponent, danger, attack line
   purple = strategic control, outpost, key square
-  yellow = attention needed, mixed implication
+  yellow = attention needed, plan, next target square
   blue   = safely defended piece or square
-  orange = opponent piece under pressure, alternative
+  orange = opponent piece under pressure
 
 VALID SQUARES: a1-h8 only (e.g. e4, d5, g1, f3). Never invent squares.
 
-STEP GUIDE:
-  Step 1 – The move: piece name, from→to, capture or not. Arrow in green for the move.
-  Step 2 – Threat / attack: what does this move NOW threaten? Red arrows to the target.
-  Step 3 – Control / defense: squares now controlled or piece now defended. Purple/blue.
-  Step 4 – Strategic idea: development, center, king safety, tempo, pin, fork — show it.
-  Step 5 (optional) – What the opponent must watch out for or their best reply.
+STEP GUIDE (all 5 required):
+  Step 1 [label "move"]     – The move: piece, from→to, capture or not. Green arrow.
+  Step 2 [label "tactic" or "threat"] – If TACTICS DETECTED are listed in the position info: name the tactic (Fork / Pin / Check / Discovered Check / Skewer) and explain why it works with concrete arrows showing the pattern. Use label "tactic". If no tactic listed, explain the immediate threat. Use label "threat".
+  Step 3 [label "threat"]   – What must the opponent respond to right now? Red arrows to the threatened square(s).
+  Step 4 [label "strategy"] – Strategic gain: development tempo, center control, king safety, piece activity. Purple/blue.
+  Step 5 [label "plan"]     – Long-term plan: the idea for the next 2-3 moves after this. Yellow squares showing next targets.
 
 RULES:
   • Every step MUST have ≥1 arrow OR ≥1 square.
@@ -338,7 +440,8 @@ RULES:
 
 def _user_prompt(req: ExplanationRequest) -> str:
     board = chess.Board(req.fen)
-    parts = [f"FEN: {req.fen}"]
+    parts = [f"FEN: {req.fen}", f"Game phase: {_game_phase(board)} (move {board.fullmove_number})"]
+
     if req.move_uci:
         try:
             move = chess.Move.from_uci(req.move_uci)
@@ -348,26 +451,37 @@ def _user_prompt(req: ExplanationRequest) -> str:
             from_sq = chess.square_name(move.from_square)
             to_sq   = chess.square_name(move.to_square)
             parts.append(f"Move: {san} (UCI: {req.move_uci}) — {pname} from {from_sq} to {to_sq}")
+
             if board.is_capture(move):
                 cap = board.piece_at(move.to_square)
                 cap_name = _PIECE_EN.get(cap.piece_type, "piece") if cap else "piece"
                 parts.append(f"Captures: {cap_name} on {to_sq}")
-            # push and inspect
+
+            # Detect tactical patterns BEFORE pushing the move
+            tactics = _detect_tactics(board, move)
+            if tactics:
+                parts.append("TACTICS DETECTED (Step 2 MUST name and explain one of these):")
+                for t in tactics:
+                    parts.append(f"  • {t}")
+
             board.push(move)
+
             if board.is_check():
                 parts.append(f"Effect: gives CHECK to king on {chess.square_name(board.king(board.turn))}")
-            # pieces attacked from new square
+
             attacks = [chess.square_name(s) for s in board.attacks(move.to_square)
                        if board.piece_at(s) and board.piece_at(s).color != (not board.turn)]
             if attacks:
                 parts.append(f"Attacks opponent pieces on: {', '.join(attacks[:4])}")
-            # squares controlled in center
+
             center_ctrl = [chess.square_name(s) for s in board.attacks(move.to_square)
                            if s in (chess.E4, chess.D4, chess.E5, chess.D5)]
             if center_ctrl:
                 parts.append(f"Controls center squares: {', '.join(center_ctrl)}")
+
         except Exception:
             parts.append(f"Move UCI: {req.move_uci}")
+
     if req.classification:
         parts.append(f"Engine assessment: {req.classification}")
     if req.eval_before is not None and req.eval_after is not None:
@@ -471,7 +585,11 @@ def _parse_steps(raw: str) -> list[dict]:
         if not arrows and not squares:
             continue
 
-        validated.append({"text": text_val, "arrows": arrows, "squares": squares})
+        label_val = str(item.get("label", "")).strip().lower()
+        if label_val not in _VALID_STEP_LABELS:
+            label_val = None
+
+        validated.append({"text": text_val, "label": label_val, "arrows": arrows, "squares": squares})
 
     return validated[:5]
 
@@ -497,6 +615,9 @@ def _template_steps(req: ExplanationRequest) -> list[dict]:
     is_cap   = board.is_capture(move)
     steps: list[dict] = []
 
+    # Detect tactics before pushing
+    tactics_found = _detect_tactics(board, move)
+
     # Step 1 – The move
     if is_cap:
         cap = board.piece_at(move.to_square)
@@ -505,6 +626,7 @@ def _template_steps(req: ExplanationRequest) -> list[dict]:
     else:
         text1 = f"The {pname} moves from {from_sq} to {to_sq}."
     steps.append({
+        "label": "move",
         "text": text1,
         "arrows": [[from_sq, to_sq, "green"]],
         "squares": [[to_sq, "green"]],
@@ -512,11 +634,22 @@ def _template_steps(req: ExplanationRequest) -> list[dict]:
 
     board.push(move)
 
-    # Step 2 – Check or attacks
-    if board.is_check():
+    # Step 2 – Named tactic OR check/attacks
+    if tactics_found:
+        tactic_text = tactics_found[0].capitalize() + "."
+        steps.append({
+            "label": "tactic",
+            "text": tactic_text,
+            "arrows": [[to_sq, chess.square_name(s), "orange"]
+                       for s in list(board.attacks(move.to_square))[:2]
+                       if board.piece_at(s) and board.piece_at(s).color == board.turn],
+            "squares": [[to_sq, "orange"]],
+        })
+    elif board.is_check():
         king_sq = chess.square_name(board.king(board.turn))
         steps.append({
-            "text": f"This move gives check! The opponent's king on {king_sq} must move.",
+            "label": "tactic",
+            "text": f"Check! The opponent's king on {king_sq} is in check and must move.",
             "arrows": [[to_sq, king_sq, "red"]],
             "squares": [[king_sq, "red"]],
         })
@@ -527,44 +660,56 @@ def _template_steps(req: ExplanationRequest) -> list[dict]:
         if attacked:
             targets = attacked[:2]
             steps.append({
+                "label": "threat",
                 "text": f"This move now attacks opponent pieces on {', '.join(chess.square_name(s) for s in targets)}.",
                 "arrows": [[to_sq, chess.square_name(s), "red"] for s in targets],
                 "squares": [[chess.square_name(s), "red"] for s in targets],
             })
 
-    # Step 3 – Center / key squares controlled
+    # Step 3 – Center / key squares controlled (strategy)
     center = [chess.E4, chess.D4, chess.E5, chess.D5]
     ctrl   = [s for s in board.attacks(move.to_square) if s in center]
     if ctrl:
         cnames = [chess.square_name(s) for s in ctrl]
         steps.append({
+            "label": "strategy",
             "text": f"From {to_sq}, the {pname} controls center squares: {', '.join(cnames)}.",
             "arrows": [[to_sq, chess.square_name(s), "purple"] for s in ctrl[:2]],
             "squares": [[chess.square_name(s), "purple"] for s in ctrl],
         })
     elif move.to_square in center:
         steps.append({
+            "label": "strategy",
             "text": f"The {pname} now occupies {to_sq}, a central square giving strong control.",
             "arrows": [[from_sq, to_sq, "purple"]],
             "squares": [[to_sq, "purple"]],
         })
 
-    # Step 4 – Evaluation summary
+    # Step 4 – Long-term plan / evaluation
     if req.eval_after is not None:
         if req.eval_after > 0.5:
             steps.append({
-                "text": f"After this move White has a better position (+{req.eval_after:.1f}). Keep developing!",
+                "label": "plan",
+                "text": f"Position is better for White (+{req.eval_after:.1f}). The plan is to develop remaining pieces and advance in the center.",
                 "arrows": [[from_sq, to_sq, "green"]],
                 "squares": [[to_sq, "green"]],
             })
         elif req.eval_after < -0.5:
             steps.append({
-                "text": f"After this move Black is slightly better ({req.eval_after:.1f}). Look for active play.",
+                "label": "plan",
+                "text": f"Black is slightly better ({req.eval_after:.1f}). Look for active piece play and counter-attack opportunities.",
                 "arrows": [[from_sq, to_sq, "blue"]],
                 "squares": [[to_sq, "blue"]],
             })
+        else:
+            steps.append({
+                "label": "plan",
+                "text": "The position is roughly equal. Focus on piece development and controlling the center.",
+                "arrows": [],
+                "squares": [[chess.square_name(s), "yellow"] for s in [chess.E4, chess.D4] if not board.piece_at(s)],
+            })
 
-    return steps[:5] or [{"text": "Develop your pieces and keep your king safe.",
+    return steps[:5] or [{"label": "strategy", "text": "Develop your pieces and keep your king safe.",
                            "arrows": [], "squares": []}]
 
 
@@ -641,7 +786,7 @@ class AIExplanationService:
         raw = json.dumps({
             "fen": req.fen, "move": req.move_uci,
             "level": req.level.value, "cls": req.classification,
-            "lang": req.language, "v": 7,   # v7: Groq primary for Malayalam (no GPU, Ollama CPU too slow)
+            "lang": req.language, "v": 8,   # v8: label field + tactic detection in user prompt
         }, sort_keys=True)
         return "aiexp:" + hashlib.sha256(raw.encode()).hexdigest()[:48]
 

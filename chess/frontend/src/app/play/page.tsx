@@ -1,19 +1,24 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardArrow, BoardSquares } from "@/components/coach-panel";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
-import { Chess } from "chess.js";
-import { BookOpen, Cpu, GraduationCap, HelpCircle, RotateCcw, Sparkles, Users, Wifi } from "lucide-react";
+import { Chess, type Square } from "chess.js";
+import { BookOpen, Cpu, GraduationCap, HelpCircle, Lock, RotateCcw, Sparkles, Users, Wifi } from "lucide-react";
 import { EvalBar } from "@/components/eval-bar";
 import { CoachPanel } from "@/components/coach-panel";
+import { CandidateMoves } from "@/components/candidate-moves";
 import { api, type MoveAnalysisResponse } from "@/lib/api";
 import { stopSpeaking } from "@/lib/speak";
 import { useLanguageStore } from "@/store/language";
+import { BOARD_THEMES, usePreferencesStore } from "@/store/preferences";
+import { useGameStore, type LastMove, type GameMode } from "@/store/game";
+import { useAuthStore } from "@/store/auth";
+import { ApiError } from "@/lib/api";
 import { loadProgress, saveProgress } from "@/lib/curriculum";
 
-type Mode = "ai" | "friend";
+type Mode = GameMode;
 
 const DIFFICULTIES = [
   {
@@ -23,6 +28,7 @@ const DIFFICULTIES = [
     skill: 0,
     guruMode: true,
     color: "text-purple-400",
+    pro: true,
   },
   {
     label: "Beginner",
@@ -31,6 +37,7 @@ const DIFFICULTIES = [
     skill: 2,
     guruMode: false,
     color: "text-emerald-400",
+    pro: false,
   },
   {
     label: "Intermediate",
@@ -39,6 +46,7 @@ const DIFFICULTIES = [
     skill: 8,
     guruMode: false,
     color: "text-yellow-400",
+    pro: true,
   },
   {
     label: "Advanced",
@@ -47,6 +55,7 @@ const DIFFICULTIES = [
     skill: 14,
     guruMode: false,
     color: "text-orange-400",
+    pro: true,
   },
   {
     label: "Master",
@@ -55,34 +64,57 @@ const DIFFICULTIES = [
     skill: 20,
     guruMode: false,
     color: "text-red-400",
+    pro: true,
   },
 ];
 
-interface LastMove {
-  fenBefore: string;
-  uci: string;
-  mover: "player" | "ai";
-}
-
 export default function PlayPage() {
-  const gameRef = useRef(new Chess());
-  const [fen, setFen] = useState(gameRef.current.fen());
+  const { isAuthenticated, plan, fetchPlan } = useAuthStore();
+  // isPro: logged in AND on pro plan. Free users and guests get Beginner-only.
+  const isPro = isAuthenticated && plan === "pro";
 
-  // Track the last move by each side (refs = immediately available, no async lag)
-  type MoveCtx = { uci: string; fenBefore: string };
-  const lastPlayerMoveRef = useRef<MoveCtx | null>(null);
-  const lastAiMoveRef     = useRef<MoveCtx | null>(null);
-  const [mode, setMode] = useState<Mode>("ai");
-  const [diffIdx, setDiffIdx] = useState(1); // default: Beginner
+  // Fetch plan once so a returning logged-in user gets the right gates immediately
+  useEffect(() => { if (isAuthenticated && plan === null) fetchPlan(); }, [isAuthenticated, plan, fetchPlan]);
+
+  const [showUpgradeBanner, setShowUpgradeBanner] = useState(false);
+
+  const {
+    autoPlayTts,
+    boardTheme, showLegalHints, alwaysWhiteBottom,
+  } = usePreferencesStore();
+
+  const {
+    moves: gameMoves,
+    mode, setMode,
+    diffIdx, setDiffIdx,
+    lastMove, setLastMove,
+    setLastPlayerMoveCtx,
+    setLastAiMoveCtx,
+    scoreCp, mate,    setScore,
+    pushMove, resetGame,
+  } = useGameStore();
+
+  // Reconstruct Chess game from stored move history on first render.
+  // null! tells TypeScript the ref is always initialized before any render access.
+  const gameRef = useRef<Chess>(null!);
+  if (!gameRef.current) {
+    const g = new Chess();
+    for (const uci of gameMoves) {
+      try { g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4) || undefined }); }
+      catch { break; }
+    }
+    gameRef.current = g;
+  }
+
+  const [fen, setFen] = useState(() => gameRef.current!.fen());
   const langCode = useLanguageStore((s) => s.code);
+
+  // Legal move hint squares (shown when dragging a piece)
+  const [hintSquares, setHintSquares] = useState<BoardSquares>({});
 
   const diff = DIFFICULTIES[diffIdx];
 
-  const [scoreCp, setScoreCp] = useState(0);
-  const [mate, setMate] = useState<number | null>(null);
   const [thinking, setThinking] = useState(false);
-
-  const [lastMove, setLastMove] = useState<LastMove | null>(null);
   const [coach, setCoach] = useState<MoveAnalysisResponse | null>(null);
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachError, setCoachError] = useState<string | null>(null);
@@ -91,6 +123,11 @@ export default function PlayPage() {
   // Board visual annotations driven by CoachPanel step interactions
   const [boardArrows, setBoardArrows] = useState<BoardArrow[]>([]);
   const [boardSquares, setBoardSquares] = useState<BoardSquares>({});
+
+  // Generation counter — ensures stale fetchCoaching responses are discarded
+  const coachGenRef = useRef(0);
+  // Ref to latest aiMove so setTimeout always calls the current version
+  const aiMoveRef = useRef<() => Promise<void>>(async () => {});
 
   const handleAnnotate = useCallback((arrows: BoardArrow[], squareStyles: BoardSquares) => {
     setBoardArrows(arrows);
@@ -107,16 +144,35 @@ export default function PlayPage() {
   }, [fen]);
 
   const orientation: "white" | "black" =
-    mode === "friend" ? (gameRef.current.turn() === "w" ? "white" : "black") : "white";
+    alwaysWhiteBottom
+      ? "white"
+      : mode === "friend" ? (gameRef.current.turn() === "w" ? "white" : "black") : "white";
+
+  const onPieceDragBegin = useCallback((_piece: string, square: string) => {
+    if (!showLegalHints) return;
+    const g = gameRef.current;
+    const moves = g.moves({ square: square as Square, verbose: true });
+    const styles: BoardSquares = {};
+    for (const m of moves) {
+      styles[m.to] = g.get(m.to as Square)
+        ? { background: "radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,0.30) 60%)", borderRadius: "50%" }
+        : { background: "radial-gradient(circle, rgba(0,0,0,0.20) 25%, transparent 25%)", borderRadius: "50%" };
+    }
+    setHintSquares(styles);
+  }, [showLegalHints]);
+
+  const onPieceDragEnd = useCallback(() => {
+    setHintSquares({});
+  }, []);
 
   const refreshEval = useCallback(async (currentFen: string) => {
     try {
       const res = await api.evaluate(currentFen, 12);
-      setScoreCp(res.score_cp);
-      setMate(res.mate);
+      setScore(res.score_cp, res.mate);
     } catch {
       /* engine optional */
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch coaching analysis — used both for manual "Why?" and auto-coaching
@@ -128,26 +184,33 @@ export default function PlayPage() {
       oppUci?: string | null,
       oppFen?: string | null,
     ) => {
+      // Stamp this request; if a newer call arrives before we finish, discard our result
+      const gen = ++coachGenRef.current;
       setCoachLoading(true);
       setCoachError(null);
       setCoach(null);
       setCoachLabel(mover === "ai" ? "ai_move" : "your_move");
       try {
         const level = diff.guruMode ? "guru" : diff.skill <= 2 ? "beginner" : diff.skill <= 14 ? "intermediate" : "advanced";
-        const res = await api.analyzeMove(fenBefore, uci, level, langCode, oppUci, oppFen);
+        // context_move_by = who made the PREVIOUS (context) move, i.e. the opposite of the current mover
+        const context_move_by: "ai" | "player" = mover === "ai" ? "player" : "ai";
+        const res = await api.analyzeMove(fenBefore, uci, level, langCode, oppUci, oppFen, context_move_by);
+        if (gen !== coachGenRef.current) return; // stale — a newer request has already started
         setCoach(res);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
-        setCoachError(
-          msg.toLowerCase().includes("auth") || msg.includes("401")
-            ? "Coach explanations need login. Please log in and try again."
-            : "Couldn't explain that move right now. Please try again."
-        );
+        if (gen !== coachGenRef.current) return;
+        if (e instanceof ApiError && e.status === 402) {
+          setCoachError("Daily free limit reached. Upgrade to Pro for unlimited AI coaching.");
+        } else if (e instanceof ApiError && e.status === 401) {
+          setCoachError("Log in to get AI coaching explanations.");
+        } else {
+          setCoachError("Couldn't explain that move right now. Please try again.");
+        }
       } finally {
-        setCoachLoading(false);
+        if (gen === coachGenRef.current) setCoachLoading(false);
       }
     },
-    [diff.skill, langCode]
+    [diff.skill, diff.guruMode, langCode]
   );
 
   const aiMove = useCallback(async () => {
@@ -165,11 +228,11 @@ export default function PlayPage() {
         });
         const newFen = g.fen();
         setFen(newFen);
-        const lm: LastMove = { fenBefore, uci: best_move_uci, mover: "ai" };
-        setLastMove(lm);
+        setLastMove({ fenBefore, uci: best_move_uci, mover: "ai" });
         // Record AI's move so it can later serve as opponent context for the player's next move
-        const prevPlayerCtx = lastPlayerMoveRef.current;
-        lastAiMoveRef.current = { uci: best_move_uci, fenBefore };
+        const prevPlayerCtx = useGameStore.getState().lastPlayerMoveCtx;
+        setLastAiMoveCtx({ uci: best_move_uci, fenBefore });
+        pushMove(best_move_uci);
         refreshEval(newFen);
 
         // Auto-coaching in Guru mode: always explain the AI's move
@@ -197,6 +260,9 @@ export default function PlayPage() {
     }
   }, [diff, refreshEval, fetchCoaching]);
 
+  // Keep ref in sync so the 400 ms setTimeout below always calls the latest aiMove
+  useEffect(() => { aiMoveRef.current = aiMove; }, [aiMove]);
+
   const onDrop = useCallback(
     (from: string, to: string): boolean => {
       const g = gameRef.current;
@@ -211,46 +277,47 @@ export default function PlayPage() {
 
       const uci = move.from + move.to + (move.promotion ?? "");
       // Record player's move before AI responds, so aiMove can use it as opponent context
-      lastPlayerMoveRef.current = { uci, fenBefore };
+      setLastPlayerMoveCtx({ uci, fenBefore });
+      pushMove(uci);
       setFen(g.fen());
       setLastMove({ fenBefore, uci, mover: "player" });
+      // Cancel any in-flight coaching request so its response won't overwrite new state
+      ++coachGenRef.current;
       setCoach(null);
       setCoachError(null);
+      setCoachLoading(false);
       setBoardArrows([]);
       setBoardSquares({});
       stopSpeaking();
       refreshEval(g.fen());
 
       if (mode === "ai" && !g.isGameOver()) {
-        setTimeout(aiMove, 400);
+        // Use ref so we always call the latest aiMove even if it changed during the delay
+        setTimeout(() => aiMoveRef.current(), 400);
       }
       return true;
     },
-    [aiMove, refreshEval, mode]
+    [refreshEval, mode]
   );
 
   const explainLast = useCallback(async () => {
-    if (!lastMove) return;
+    const lm = useGameStore.getState().lastMove;
+    if (!lm) return;
     // Opponent context: if explaining the player's move → AI was the opponent; and vice-versa
-    const oppCtx = lastMove.mover === "player"
-      ? lastAiMoveRef.current
-      : lastPlayerMoveRef.current;
-    fetchCoaching(lastMove.fenBefore, lastMove.uci, lastMove.mover, oppCtx?.uci, oppCtx?.fenBefore);
-  }, [lastMove, fetchCoaching]);
+    const { lastAiMoveCtx: aiCtx, lastPlayerMoveCtx: playerCtx } = useGameStore.getState();
+    const oppCtx = lm.mover === "player" ? aiCtx : playerCtx;
+    fetchCoaching(lm.fenBefore, lm.uci, lm.mover, oppCtx?.uci, oppCtx?.fenBefore);
+  }, [fetchCoaching]);
 
   const reset = () => {
     gameRef.current = new Chess();
     setFen(gameRef.current.fen());
-    setLastMove(null);
     setCoach(null);
     setCoachError(null);
-    setScoreCp(0);
-    setMate(null);
     setBoardArrows([]);
     setBoardSquares({});
     stopSpeaking();
-    lastPlayerMoveRef.current = null;
-    lastAiMoveRef.current     = null;
+    resetGame(); // clears moves, lastMove, lastPlayerMoveCtx, lastAiMoveCtx, scoreCp, mate in store
   };
 
   const switchMode = (m: Mode) => {
@@ -295,12 +362,14 @@ export default function PlayPage() {
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
+              onPieceDragBegin={onPieceDragBegin}
+              onPieceDragEnd={onPieceDragEnd}
               boardOrientation={orientation}
               customBoardStyle={{ borderRadius: "12px" }}
-              customDarkSquareStyle={{ backgroundColor: "#739552" }}
-              customLightSquareStyle={{ backgroundColor: "#ebecd0" }}
+              customDarkSquareStyle={{ backgroundColor: BOARD_THEMES[boardTheme].dark }}
+              customLightSquareStyle={{ backgroundColor: BOARD_THEMES[boardTheme].light }}
               customArrows={boardArrows as any}
-              customSquareStyles={boardSquares}
+              customSquareStyles={{ ...hintSquares, ...boardSquares }}
             />
             <div className="mt-3 flex items-center justify-between">
               <span className="font-ml text-sm text-gray-300">{status}</span>
@@ -328,28 +397,60 @@ export default function PlayPage() {
 
               {/* Difficulty buttons */}
               <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-5">
-                {DIFFICULTIES.map((d, i) => (
-                  <button
-                    key={d.label}
-                    onClick={() => { setDiffIdx(i); reset(); }}
-                    className={`relative rounded-lg border px-2 py-2.5 text-xs transition ${
-                      diffIdx === i
-                        ? "border-brand bg-brand/10 text-white"
-                        : "border-surface-border text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {d.guruMode && (
-                      <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-purple-600 px-1 py-0.5 text-[8px] font-bold text-white">
-                        GURU
-                      </span>
-                    )}
-                    <span className={`block font-medium ${diffIdx === i ? "text-white" : d.color}`}>
-                      {d.ml}
-                    </span>
-                    <span className="block text-[10px] text-gray-500">{d.sublabel}</span>
-                  </button>
-                ))}
+                {DIFFICULTIES.map((d, i) => {
+                  const locked = d.pro && !isPro;
+                  return (
+                    <button
+                      key={d.label}
+                      onClick={() => {
+                        if (locked) { setShowUpgradeBanner(true); return; }
+                        setShowUpgradeBanner(false);
+                        setDiffIdx(i);
+                        reset();
+                      }}
+                      className={`relative rounded-lg border px-2 py-2.5 text-xs transition ${
+                        diffIdx === i && !locked
+                          ? "border-brand bg-brand/10 text-white"
+                          : locked
+                          ? "cursor-pointer border-surface-border opacity-60"
+                          : "border-surface-border text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {d.guruMode && !locked && (
+                        <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-purple-600 px-1 py-0.5 text-[8px] font-bold text-white">
+                          GURU
+                        </span>
+                      )}
+                      {locked && (
+                        <span className="absolute -top-1.5 right-1 rounded-full bg-amber-600 px-1 py-0.5 text-[8px] font-bold text-white">
+                          PRO
+                        </span>
+                      )}
+                      {locked
+                        ? <Lock className="mx-auto mb-0.5 h-3 w-3 text-gray-500" />
+                        : <span className={`block font-medium ${diffIdx === i ? "text-white" : d.color}`}>{d.ml}</span>
+                      }
+                      <span className="block text-[10px] text-gray-500">{d.sublabel}</span>
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Upgrade banner — shown when a locked level is clicked */}
+              {showUpgradeBanner && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-700/50 bg-amber-950/30 p-3 text-xs text-amber-300">
+                  <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                  <div>
+                    <p className="font-semibold text-amber-200">Pro plan required</p>
+                    <p className="mt-0.5 text-amber-400/80">
+                      Guru mode, Intermediate, Advanced & Master require a Pro subscription. Beginner is always free.
+                    </p>
+                    <Link href="/pricing" className="mt-1.5 inline-block rounded bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-amber-500">
+                      Upgrade to Pro →
+                    </Link>
+                  </div>
+                </div>
+              )}
 
               {/* Guru mode banner */}
               {diff.guruMode && (
@@ -409,8 +510,21 @@ export default function PlayPage() {
                 }
                 moveUci={lastMove?.uci}
                 onAnnotate={handleAnnotate}
-                autoPlay={diff.guruMode}
+                autoPlay={diff.guruMode && autoPlayTts}
               />
+
+              {/* "Your turn" prompt — shown once Guru explanation has loaded */}
+              {diff.guruMode && lastMove?.mover === "ai" && coach && !coachLoading && !gameRef.current.isGameOver() && (
+                <div className="flex items-center gap-2.5 rounded-xl border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm text-brand">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand" />
+                  <span>{langCode === "ml" ? "ഇനി നിങ്ങളുടെ ഊഴം — board-ൽ move ഉണ്ടാക്കൂ!" : "Your turn — make your move on the board!"}</span>
+                </div>
+              )}
+
+              {/* Candidate moves — Guru mode "What should I play?" */}
+              {diff.guruMode && lastMove?.mover === "ai" && !gameRef.current.isGameOver() && (
+                <CandidateMoves fen={fen} langCode={langCode} level="guru" />
+              )}
 
               {/* Onboarding hint for total beginners */}
               {!lastMove && !coachLoading && (

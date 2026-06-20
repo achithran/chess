@@ -32,5 +32,22 @@ def snapshot_leaderboard() -> str:
 
 @celery_app.task(name="app.workers.tasks.rotate_daily_puzzle")
 def rotate_daily_puzzle() -> str:
-    logger.info("task.rotate_daily_puzzle")
+    """Pick a new random daily puzzle. Scheduled to run once per day via Celery Beat."""
+    from sqlalchemy import update as sa_update
+    from app.db.session import AsyncSessionLocal
+    from app.models.puzzle import Puzzle
+    from sqlalchemy import func, select
+    from datetime import datetime, timezone
+
+    async def _rotate():
+        async with AsyncSessionLocal() as db:
+            await db.execute(sa_update(Puzzle).where(Puzzle.is_daily.is_(True)).values(is_daily=False))
+            new_daily = (await db.execute(select(Puzzle).order_by(func.random()).limit(1))).scalars().first()
+            if new_daily:
+                new_daily.is_daily = True
+                new_daily.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info("task.rotate_daily_puzzle", puzzle_id=new_daily.id)
+
+    asyncio.run(_rotate())
     return "ok"

@@ -75,6 +75,23 @@ class AuthService:
             refresh_token=create_refresh_token(user.id),
         )
 
+    async def change_password(self, user: User, current_password: str, new_password: str) -> None:
+        if not user.hashed_password:
+            raise HTTPException(status_code=400, detail="OAuth accounts cannot change password here")
+        if not verify_password(current_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        user.hashed_password = hash_password(new_password)
+        self.db.add(user)
+        await self.db.commit()
+
+    async def update_profile(self, user: User, full_name: str | None) -> User:
+        if full_name is not None:
+            user.full_name = full_name
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
     async def refresh(self, refresh_token: str) -> TokenPair:
         try:
             payload = decode_token(refresh_token, expected_type="refresh")

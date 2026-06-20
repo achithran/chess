@@ -34,10 +34,12 @@ def _preprocess(text: str) -> str:
     return re.sub(r" {2,}", " ", text).strip()
 
 
-async def synthesize(text: str, voice_id: str | None = None) -> bytes:
-    """Return MP3 bytes for the given Manglish text.
+async def synthesize(text: str, voice_id: str | None = None, language: str | None = None) -> bytes:
+    """Return MP3 bytes for the given text.
 
     voice_id: ElevenLabs voice ID — uses _DEFAULT_VOICE_ID when not provided.
+    language: ElevenLabs language_code (e.g. "ta", "ml", "hi") — improves pronunciation
+              quality significantly for non-English languages. Pass None to auto-detect.
     Raises ValueError if ELEVENLABS_API_KEY is not set.
     """
     if not settings.ELEVENLABS_API_KEY:
@@ -48,16 +50,16 @@ async def synthesize(text: str, voice_id: str | None = None) -> bytes:
         raise ValueError("Empty text after preprocessing")
 
     vid = voice_id or _DEFAULT_VOICE_ID
-    cache_key = _cache_key(text, vid)
+    cache_key = _cache_key(text, vid, language)
 
     cached = await _get_cached(cache_key)
     if cached is not None:
-        logger.debug("tts.cache_hit", extra={"chars": len(text), "voice": vid})
+        logger.debug("tts.cache_hit", extra={"chars": len(text), "voice": vid, "lang": language})
         return cached
 
-    audio = await _call_elevenlabs(text, vid)
+    audio = await _call_elevenlabs(text, vid, language)
     await _set_cached(cache_key, audio)
-    logger.info("tts.synthesized", extra={"chars": len(text), "voice": vid, "bytes": len(audio)})
+    logger.info("tts.synthesized", extra={"chars": len(text), "voice": vid, "lang": language, "bytes": len(audio)})
     return audio
 
 
@@ -107,15 +109,34 @@ async def list_indian_voices() -> list[dict]:
     return results[:12]
 
 
-# Curated fallback list — known ElevenLabs voices with Indian English accent
+# Curated fallback list — voices with good multilingual/Indian language coverage.
+# eleven_multilingual_v2 + language_code param makes any voice sound natural in
+# Tamil/Malayalam/Hindi — the voice_id controls character/tone, language_code
+# controls phonetics. These voices have been selected for clear diction.
 _KNOWN_INDIAN_VOICES: list[dict] = [
     {
         "voice_id": "onwK4e9ZLuTAKqWW03F9",
         "name": "Daniel",
-        "accent": "British",
-        "description": "Warm, authoritative male voice — good multilingual coverage",
+        "accent": "Multilingual",
+        "description": "Warm, authoritative — good Tamil/Malayalam coverage with language_code",
         "preview_url": "",
-        "language": "en",
+        "language": "multi",
+    },
+    {
+        "voice_id": "TX3LPaxmHKxFdv7VOQHJ",
+        "name": "Liam",
+        "accent": "American",
+        "description": "Clear, natural male voice — strong multilingual output",
+        "preview_url": "",
+        "language": "multi",
+    },
+    {
+        "voice_id": "bVMeCyTHy58xNoL34h3p",
+        "name": "Jeremy",
+        "accent": "American Irish",
+        "description": "Warm male voice with clear diction across Indian languages",
+        "preview_url": "",
+        "language": "multi",
     },
     {
         "voice_id": "pNInz6obpgDQGcFmaJgB",
@@ -123,21 +144,13 @@ _KNOWN_INDIAN_VOICES: list[dict] = [
         "accent": "American",
         "description": "Deep, clear male voice",
         "preview_url": "",
-        "language": "en",
-    },
-    {
-        "voice_id": "N2lVS1w4EtoT3dr4eOWO",
-        "name": "Callum",
-        "accent": "Transatlantic",
-        "description": "Natural conversational male voice",
-        "preview_url": "",
-        "language": "en",
+        "language": "multi",
     },
 ]
 
 
-def _cache_key(text: str, voice_id: str) -> str:
-    h = hashlib.sha256(f"{voice_id}:{text}".encode()).hexdigest()
+def _cache_key(text: str, voice_id: str, language: str | None = None) -> str:
+    h = hashlib.sha256(f"{voice_id}:{language or ''}:{text}".encode()).hexdigest()
     return f"{_CACHE_PREFIX}{h}"
 
 
@@ -158,9 +171,9 @@ async def _set_cached(key: str, audio: bytes) -> None:
         logger.warning("tts.cache_write_failed", extra={"error": str(exc)})
 
 
-async def _call_elevenlabs(text: str, voice_id: str) -> bytes:
+async def _call_elevenlabs(text: str, voice_id: str, language: str | None = None) -> bytes:
     url = f"{_EL_BASE}/text-to-speech/{voice_id}"
-    payload = {
+    payload: dict = {
         "text": text,
         "model_id": _MODEL,
         "voice_settings": {
@@ -170,6 +183,11 @@ async def _call_elevenlabs(text: str, voice_id: str) -> bytes:
             "use_speaker_boost": True,
         },
     }
+    # language_code significantly improves pronunciation for Tamil, Malayalam,
+    # Hindi etc. — tells the model which phonetic system to use instead of auto-detecting.
+    if language:
+        payload["language_code"] = language
+
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(
             url,

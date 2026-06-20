@@ -26,73 +26,125 @@ _PIECE_EN: dict[int, str] = {
     chess.KING:   "King",
 }
 
-# ── Opponent-context slide templates (2 slides prepended to "Why This Move?") ──
+# ── Context-move slide templates (2 slides prepended to "Why This Move?") ──
+# Two variants: moves made by the AI/Computer vs moves made by the human player.
 
-_OPP_MOVE_TMPL: dict[str, dict[str, str]] = {
+_AI_MOVE_TMPL: dict[str, dict[str, str]] = {
     "en": {
-        "move": "Opponent's {piece} moved from {from_sq} to {to_sq}.",
-        "capture": "Opponent's {piece} captured your {cap_piece} on {to_sq}!",
-        "check": "Opponent's {piece} moved to {to_sq}, giving check!",
+        "move": "Computer's {piece} moved from {from_sq} to {to_sq}.",
+        "capture": "Computer's {piece} captured your {cap_piece} on {to_sq}!",
+        "check": "Computer's {piece} moved to {to_sq}, giving check!",
     },
     "ml": {
-        "move": "Opponent-ന്റെ {piece} {from_sq}-ൽ നിന്ന് {to_sq}-ലേക്ക് move ചെയ്തു.",
-        "capture": "Opponent-ന്റെ {piece} {to_sq}-ൽ നിങ്ങളുടെ {cap_piece}-നെ capture ചെയ്തു!",
-        "check": "Opponent-ന്റെ {piece} {to_sq}-ലേക്ക് move ചെയ്ത് check കൊടുത്തു!",
+        "move": "Computer-ന്റെ {piece} {from_sq}-ൽ നിന്ന് {to_sq}-ലേക്ക് move ചെയ്തു.",
+        "capture": "Computer-ന്റെ {piece} {to_sq}-ൽ നിങ്ങളുടെ {cap_piece}-നെ capture ചെയ്തു!",
+        "check": "Computer-ന്റെ {piece} {to_sq}-ലേക്ക് move ചെയ്ത് check കൊടുത്തു!",
     },
     "hi": {
-        "move": "प्रतिद्वंद्वी का {piece} {from_sq} से {to_sq} गया।",
-        "capture": "प्रतिद्वंद्वी के {piece} ने {to_sq} पर आपका {cap_piece} capture किया!",
-        "check": "प्रतिद्वंद्वी के {piece} ने {to_sq} पर जाकर check दिया!",
+        "move": "Computer का {piece} {from_sq} से {to_sq} गया।",
+        "capture": "Computer के {piece} ने {to_sq} पर आपका {cap_piece} capture किया!",
+        "check": "Computer के {piece} ने {to_sq} पर जाकर check दिया!",
     },
     "ta": {
-        "move": "எதிரியின் {piece} {from_sq}-லிருந்து {to_sq}-க்கு சென்றது.",
-        "capture": "எதிரியின் {piece} {to_sq}-ல் உங்கள் {cap_piece}-ஐ capture செய்தது!",
-        "check": "எதிரியின் {piece} {to_sq}-க்கு சென்று check கொடுத்தது!",
+        "move": "Computer-ன் {piece} {from_sq}-லிருந்து {to_sq}-க்கு சென்றது.",
+        "capture": "Computer-ன் {piece} {to_sq}-ல் உங்கள் {cap_piece}-ஐ capture செய்தது!",
+        "check": "Computer-ன் {piece} {to_sq}-க்கு சென்று check கொடுத்தது!",
     },
 }
 
-_OPP_THREAT_TMPL: dict[str, dict[str, str]] = {
+_PLAYER_MOVE_TMPL: dict[str, dict[str, str]] = {
+    "en": {
+        "move": "You moved your {piece} from {from_sq} to {to_sq}.",
+        "capture": "Your {piece} captured the Computer's {cap_piece} on {to_sq}!",
+        "check": "Your {piece} moved to {to_sq}, giving check!",
+    },
+    "ml": {
+        "move": "നിങ്ങൾ {piece}-നെ {from_sq}-ൽ നിന്ന് {to_sq}-ലേക്ക് move ചെയ്തു.",
+        "capture": "നിങ്ങളുടെ {piece} {to_sq}-ൽ Computer-ന്റെ {cap_piece}-നെ capture ചെയ്തു!",
+        "check": "നിങ്ങളുടെ {piece} {to_sq}-ലേക്ക് move ചെയ്ത് check കൊടുത്തു!",
+    },
+    "hi": {
+        "move": "आपने अपना {piece} {from_sq} से {to_sq} पर चला।",
+        "capture": "आपके {piece} ने {to_sq} पर Computer का {cap_piece} capture किया!",
+        "check": "आपके {piece} ने {to_sq} पर जाकर check दिया!",
+    },
+    "ta": {
+        "move": "நீங்கள் உங்கள் {piece}-ஐ {from_sq}-லிருந்து {to_sq}-க்கு நகர்த்தினீர்கள்.",
+        "capture": "உங்கள் {piece} {to_sq}-ல் Computer-ன் {cap_piece}-ஐ capture செய்தது!",
+        "check": "உங்கள் {piece} {to_sq}-க்கு சென்று check கொடுத்தது!",
+    },
+}
+
+_AI_THREAT_TMPL: dict[str, dict[str, str]] = {
     "en": {
         "check": "Your King is now in check — you must respond immediately.",
         "attack": "This now attacks your {targets} — watch out!",
-        "center": "This secures center control, giving the opponent a strategic advantage.",
-        "general": "This places the opponent's piece in an active position — time to counter.",
+        "center": "This secures center control, giving the Computer a strategic advantage.",
+        "general": "This places the Computer's piece in an active position — time to counter.",
     },
     "ml": {
         "check": "ഇപ്പോൾ നിങ്ങളുടെ King check-ൽ ആണ് — ഉടൻ respond ചെയ്യണം.",
         "attack": "ഇത് നിങ്ങളുടെ {targets}-നെ attack ചെയ്യുന്നു — ശ്രദ്ധിക്കൂ!",
-        "center": "ഇത് center control ഉറപ്പിക്കുന്നു — opponent-ന് strategic advantage ഉണ്ട്.",
-        "general": "Opponent-ന്റെ piece ഒരു active position-ൽ ആണ് — ഇനി counter ചെയ്യണം.",
+        "center": "ഇത് center control ഉറപ്പിക്കുന്നു — Computer-ന് strategic advantage ഉണ്ട്.",
+        "general": "Computer-ന്റെ piece ഒരു active position-ൽ ആണ് — ഇനി counter ചെയ്യണം.",
     },
     "hi": {
         "check": "आपका King अब check में है — तुरंत जवाब दें।",
         "attack": "यह अब आपके {targets} पर हमला कर रहा है — सावधान!",
-        "center": "यह center control मजबूत करता है, जिससे प्रतिद्वंद्वी को रणनीतिक लाभ।",
-        "general": "यह opponent के piece को एक active position में रखता है — counter करें।",
+        "center": "यह center control मजबूत करता है, जिससे Computer को रणनीतिक लाभ।",
+        "general": "यह Computer के piece को एक active position में रखता है — counter करें।",
     },
     "ta": {
         "check": "உங்கள் King இப்போது check-ல் உள்ளது — உடனே பதிலளிக்கவும்.",
         "attack": "இது உங்கள் {targets}-ஐ attack செய்கிறது — கவனமாக இருங்கள்!",
-        "center": "இது center control-ஐ உறுதிப்படுத்துகிறது — எதிரிக்கு strategic advantage.",
-        "general": "எதிரியின் piece ஒரு active position-ல் உள்ளது — counter செய்யுங்கள்.",
+        "center": "இது center control-ஐ உறுதிப்படுத்துகிறது — Computer-க்கு strategic advantage.",
+        "general": "Computer-ன் piece ஒரு active position-ல் உள்ளது — counter செய்யுங்கள்.",
+    },
+}
+
+_PLAYER_THREAT_TMPL: dict[str, dict[str, str]] = {
+    "en": {
+        "check": "The Computer's King is now in check — watch how it responds.",
+        "attack": "Your move attacks the Computer's {targets}.",
+        "center": "You've taken good center control with this move.",
+        "general": "Your piece is now in an active position.",
+    },
+    "ml": {
+        "check": "Computer-ന്റെ King ഇപ്പോൾ check-ൽ ആണ് — അത് എങ്ങനെ respond ചെയ്യുന്നു എന്ന് കാണൂ.",
+        "attack": "നിങ്ങളുടെ move Computer-ന്റെ {targets}-നെ attack ചെയ്യുന്നു.",
+        "center": "ഈ move-ൽ നിങ്ങൾ center control നേടി.",
+        "general": "നിങ്ങളുടെ piece ഒരു active position-ൽ ആണ്.",
+    },
+    "hi": {
+        "check": "Computer का King अब check में है — देखें यह कैसे respond करता है।",
+        "attack": "आपके move से Computer के {targets} पर attack है।",
+        "center": "आपने इस move से center control हासिल किया।",
+        "general": "आपका piece अब एक active position में है।",
+    },
+    "ta": {
+        "check": "Computer-ன் King இப்போது check-ல் உள்ளது — அது எப்படி பதிலளிக்கிறது என்று பாருங்கள்.",
+        "attack": "உங்கள் move Computer-ன் {targets}-ஐ attack செய்கிறது.",
+        "center": "இந்த move மூலம் நீங்கள் center control பெற்றீர்கள்.",
+        "general": "உங்கள் piece இப்போது ஒரு active position-ல் உள்ளது.",
     },
 }
 
 
-def _opponent_context_steps(
+def _context_move_steps(
     fen: str,
-    opponent_move_uci: str,
-    opponent_fen: str | None,
+    context_move_uci: str,
+    context_fen: str | None,
     language: str,
+    context_move_by: str,  # "ai" | "player"
 ) -> list[dict]:
-    """Return 2 board-annotated slides about the opponent's previous move.
+    """Return 2 board-annotated slides about the previous context move.
 
-    fen           – position AFTER the opponent moved (= before user's move)
-    opponent_fen  – position BEFORE the opponent moved (enables capture detection)
+    context_move_by = "ai"     → the Computer made this move (e.g. we're now explaining player's response)
+    context_move_by = "player" → the human made this move (e.g. we're now explaining AI's response)
     """
     try:
         board_after = chess.Board(fen)
-        move = chess.Move.from_uci(opponent_move_uci)
+        move = chess.Move.from_uci(context_move_uci)
         from_sq = chess.square_name(move.from_square)
         to_sq   = chess.square_name(move.to_square)
 
@@ -101,12 +153,12 @@ def _opponent_context_steps(
             return []
         pname = _PIECE_EN.get(piece.piece_type, "piece").capitalize()
 
-        # Capture detection — needs the board state before opponent's move
+        # Capture detection
         is_capture = False
         cap_pname  = ""
-        if opponent_fen:
+        if context_fen:
             try:
-                board_before = chess.Board(opponent_fen)
+                board_before = chess.Board(context_fen)
                 cap = board_before.piece_at(move.to_square)
                 if cap and cap.color != piece.color:
                     is_capture = True
@@ -114,10 +166,13 @@ def _opponent_context_steps(
             except Exception:
                 pass
 
-        # Check detection (board_after.turn is user's turn; if in_check → opponent gave check)
         is_check = board_after.is_check()
 
-        tmpl1 = _OPP_MOVE_TMPL.get(language) or _OPP_MOVE_TMPL["en"]
+        # Select the right template based on who made the context move
+        move_tmpl_map   = _PLAYER_MOVE_TMPL   if context_move_by == "player" else _AI_MOVE_TMPL
+        threat_tmpl_map = _PLAYER_THREAT_TMPL if context_move_by == "player" else _AI_THREAT_TMPL
+
+        tmpl1 = move_tmpl_map.get(language) or move_tmpl_map["en"]
         if is_check:
             s1_text = tmpl1["check"].format(piece=pname, from_sq=from_sq, to_sq=to_sq)
         elif is_capture:
@@ -126,33 +181,33 @@ def _opponent_context_steps(
             s1_text = tmpl1["move"].format(piece=pname, from_sq=from_sq, to_sq=to_sq)
 
         step1 = {
+            "label":   "move",
             "text":    s1_text,
-            "arrows":  [[from_sq, to_sq, "orange"]],
-            "squares": [[to_sq, "orange"]],
+            "arrows":  [[from_sq, to_sq, "green" if context_move_by == "player" else "orange"]],
+            "squares": [[to_sq,   "green" if context_move_by == "player" else "orange"]],
         }
 
-        # Step 2 — what the opponent's move threatens / achieves
-        tmpl2 = _OPP_THREAT_TMPL.get(language) or _OPP_THREAT_TMPL["en"]
-        user_color = board_after.turn
+        # Step 2 — consequence / threat of the context move
+        tmpl2 = threat_tmpl_map.get(language) or threat_tmpl_map["en"]
+        viewer_color = board_after.turn  # the person whose turn is next = the one "reading" this
         s2_arrows:  list[list[str]] = []
         s2_squares: list[list[str]] = []
 
         if is_check:
-            king_sq = chess.square_name(board_after.king(user_color))
-            s2_text = tmpl2["check"]
+            king_sq = chess.square_name(board_after.king(viewer_color))
+            s2_text    = tmpl2["check"]
             s2_arrows  = [[to_sq, king_sq, "red"]]
             s2_squares = [[king_sq, "red"]]
         else:
-            # User pieces attacked from the opponent's landed square
             attacked = [
                 s for s in board_after.attacks(move.to_square)
-                if board_after.piece_at(s) and board_after.piece_at(s).color == user_color
+                if board_after.piece_at(s) and board_after.piece_at(s).color == viewer_color
             ]
             if attacked:
-                names = []
-                for s in attacked[:3]:
-                    p = board_after.piece_at(s)
-                    names.append(f"{_PIECE_EN.get(p.piece_type,'piece').capitalize()} on {chess.square_name(s)}")
+                names = [
+                    f"{_PIECE_EN.get(board_after.piece_at(s).piece_type, 'piece').capitalize()} on {chess.square_name(s)}"
+                    for s in attacked[:3]
+                ]
                 s2_text    = tmpl2["attack"].format(targets=", ".join(names))
                 s2_arrows  = [[to_sq, chess.square_name(s), "red"] for s in attacked[:2]]
                 s2_squares = [[chess.square_name(s), "red"] for s in attacked[:2]]
@@ -165,13 +220,13 @@ def _opponent_context_steps(
                     s2_squares = [[chess.square_name(s), "purple"] for s in ctrl]
                 else:
                     s2_text    = tmpl2["general"]
-                    s2_squares = [[to_sq, "orange"]]
+                    s2_squares = [[to_sq, "green" if context_move_by == "player" else "orange"]]
 
-        step2 = {"text": s2_text, "arrows": s2_arrows, "squares": s2_squares}
+        step2 = {"label": "threat", "text": s2_text, "arrows": s2_arrows, "squares": s2_squares}
         return [step1, step2]
 
     except Exception as exc:
-        logger.warning("opponent_context.failed", error=str(exc))
+        logger.warning("context_move_steps.failed", error=str(exc))
         return []
 
 
@@ -241,6 +296,7 @@ class AnalysisService:
         language: str = "en",
         opponent_move_uci: str | None = None,
         opponent_fen: str | None = None,
+        context_move_by: str = "ai",  # "ai" | "player"
     ) -> MoveReview:
         board = chess.Board(fen)
         before = await stockfish_service.evaluate_fen(fen, depth=depth)
@@ -279,10 +335,12 @@ class AnalysisService:
         else:
             best_reason = msgs["best"]
 
-        # Prepend 2 opponent-context slides if the caller supplied the previous move
+        # Prepend 2 context slides about the previous move if supplied
         opp_steps = []
         if opponent_move_uci:
-            opp_steps = _opponent_context_steps(fen, opponent_move_uci, opponent_fen, language)
+            opp_steps = _context_move_steps(
+                fen, opponent_move_uci, opponent_fen, language, context_move_by
+            )
 
         return MoveReview(
             ply=0,

@@ -426,7 +426,7 @@ PUZZLES: list[dict] = [
         "fen": "rnbqkb1r/ppp2ppp/3p1n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 5",
         "moves": ["f3g5"],
         "rating": 1000,
-        "themes": ["tacticalShot", "fried liver"],
+        "themes": ["tacticalShot", "friedLiver"],
         "hints": [
             {
                 "move": "f3g5",

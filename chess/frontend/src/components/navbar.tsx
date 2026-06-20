@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LogOut } from "lucide-react";
-import { LanguageSwitcher } from "@/components/language-switcher";
+import { LogOut, Settings } from "lucide-react";
 import { ChanakyaLogo } from "@/components/chanakya-logo";
 import { useAuthStore } from "@/store/auth";
 
@@ -42,8 +41,6 @@ export function Navbar() {
 
         {/* Right side — push to end */}
         <div className="ml-auto flex items-center gap-3">
-          <LanguageSwitcher />
-
           {isAuthenticated ? (
             <>
               {/* Avatar chip */}
@@ -52,6 +49,14 @@ export function Navbar() {
                   {email?.[0]?.toUpperCase() ?? "?"}
                 </span>
               </div>
+              <Link
+                href="/settings"
+                title="Settings"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-gray-400 transition hover:bg-white/8 hover:text-white"
+              >
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:block">Settings</span>
+              </Link>
               <button
                 onClick={logout}
                 title="Logout"

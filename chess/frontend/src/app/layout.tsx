@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Noto_Sans_Malayalam } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/navbar";
+import { TtsAuthBanner } from "@/components/tts-auth-banner";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const malayalam = Noto_Sans_Malayalam({
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body className="min-h-screen font-sans antialiased">
         <Navbar />
         <main>{children}</main>
+        <TtsAuthBanner />
       </body>
     </html>
   );

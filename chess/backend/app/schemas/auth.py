@@ -28,6 +28,15 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = Field(None, max_length=100)
+
+
 class UserOut(BaseModel):
     id: int
     email: EmailStr

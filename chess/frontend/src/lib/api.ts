@@ -167,6 +167,7 @@ export interface ExplanationStep {
   text_ml: string;
   arrows:  string[][];   // [[from_sq, to_sq, color], ...]
   squares: string[][];   // [[sq, color], ...]
+  label?:  string;       // move | tactic | threat | strategy | plan | warning
 }
 
 export interface MoveAnalysisResponse {
@@ -206,7 +207,6 @@ export interface PuzzleOut {
 
 export interface PuzzleSolveResponse {
   correct: boolean;
-  solution: string[];
   new_rating: number;
   streak: number;
 }
@@ -265,11 +265,12 @@ export const api = {
     language = "en",
     opponent_move_uci?: string | null,
     opponent_fen?: string | null,
+    context_move_by: "ai" | "player" = "ai",
   ) =>
     request<MoveAnalysisResponse>("/analysis/move", {
       method: "POST",
       body: JSON.stringify({
-        fen, move_uci, level, language,
+        fen, move_uci, level, language, context_move_by,
         ...(opponent_move_uci ? { opponent_move_uci } : {}),
         ...(opponent_fen      ? { opponent_fen }      : {}),
       }),
@@ -360,5 +361,42 @@ export const api = {
     request<PuzzleSolveResponse>("/puzzles/solve", {
       method: "POST",
       body: JSON.stringify({ puzzle_id: puzzleId, moves }),
+    }),
+
+  // ---- Candidate moves -------------------------------------------------------
+
+  candidateMoves: (fen: string, language = "en", level = "guru") =>
+    request<{
+      opening_name: string | null;
+      opening_tip: string | null;
+      candidates: {
+        move_san: string;
+        move_uci: string;
+        name: string;
+        short_reason: string;
+        pros: string[];
+        cons: string[];
+        style: "aggressive" | "solid" | "creative";
+      }[];
+    }>("/analysis/candidates", {
+      method: "POST",
+      body: JSON.stringify({ fen, language, level }),
+    }),
+
+  // ---- Auth / profile -------------------------------------------------------
+
+  me: () =>
+    request<{ id: number; email: string; full_name: string | null; plan: string; rating: number }>("/auth/me"),
+
+  updateProfile: (full_name: string) =>
+    request<{ id: number; email: string; full_name: string | null }>("/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ full_name }),
+    }),
+
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
     }),
 };

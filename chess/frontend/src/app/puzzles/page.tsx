@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, ApiError, HintOut, PuzzleOut } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
+import { BOARD_THEMES, usePreferencesStore } from "@/store/preferences";
 
 type Feedback = { kind: "correct" | "wrong" | "solved" | "error"; text: string } | null;
 
@@ -23,7 +24,9 @@ const PIECE_LABEL: Record<string, string> = {
 
 export default function PuzzlesPage() {
   const { isAuthenticated } = useAuthStore();
+  const { boardTheme } = usePreferencesStore();
   const gameRef = useRef(new Chess());
+  const genRef = useRef(0); // incremented on reset to cancel stale timeouts
   const [puzzle, setPuzzle] = useState<PuzzleOut | null>(null);
   const [fen, setFen] = useState("");
   const [solverStep, setSolverStep] = useState(0); // which solver move we're on (0-indexed)
@@ -102,10 +105,12 @@ export default function PuzzlesPage() {
     const uci = move.from + move.to + (move.promotion || "");
     setHintArrow([]);
 
+    const gen = genRef.current;
     setLocked(true);
     api
       .checkPuzzleMove(puzzle.id, solverStep, uci)
       .then((res) => {
+        if (genRef.current !== gen) return; // puzzle was reset mid-flight
         if (!res.correct) {
           game.undo();
           setFen(game.fen());
@@ -126,6 +131,7 @@ export default function PuzzlesPage() {
         // Auto-play the opponent's scripted reply, then unlock for the next solver move.
         if (res.opponent_reply) {
           setTimeout(() => {
+            if (genRef.current !== gen) return; // puzzle was reset during the delay
             game.move({
               from: res.opponent_reply!.slice(0, 2),
               to: res.opponent_reply!.slice(2, 4),
@@ -175,6 +181,7 @@ export default function PuzzlesPage() {
 
   const reset = () => {
     if (!puzzle) return;
+    genRef.current += 1; // cancel any pending timeouts from the previous attempt
     const g = new Chess(puzzle.fen);
     gameRef.current = g;
     setFen(g.fen());
@@ -203,8 +210,8 @@ export default function PuzzlesPage() {
               position={fen}
               onPieceDrop={onDrop}
               customArrows={hintArrow as never}
-              customDarkSquareStyle={{ backgroundColor: "#739552" }}
-              customLightSquareStyle={{ backgroundColor: "#ebecd0" }}
+              customDarkSquareStyle={{ backgroundColor: BOARD_THEMES[boardTheme].dark }}
+              customLightSquareStyle={{ backgroundColor: BOARD_THEMES[boardTheme].light }}
               customBoardStyle={{ borderRadius: "12px" }}
             />
           )}
@@ -278,7 +285,7 @@ export default function PuzzlesPage() {
               </h3>
               <button
                 onClick={requestHint}
-                disabled={hintLoading || solved}
+                disabled={hintLoading || solved || locked}
                 className="btn-ghost px-3 py-1 text-xs disabled:opacity-50"
               >
                 {hintLoading ? "Loading…" : "Get a hint"}

@@ -10,6 +10,7 @@ import {
 import type { MoveAnalysisResponse } from "@/lib/api";
 import { isSpeechSupported, speak, speakSequence, stopSpeaking } from "@/lib/speak";
 import { ttsLangFor, useLanguageStore } from "@/store/language";
+import { usePreferencesStore } from "@/store/preferences";
 import { VoicePicker, getStoredVoiceId } from "@/components/voice-picker";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -187,13 +188,59 @@ const COLOR_TEXT: Record<string, string> = {
   yellow: "text-yellow-300", blue: "text-blue-300", orange: "text-orange-300",
 };
 
+// ── Step-type visual config ───────────────────────────────────────────────────
+
+interface StepTypeCfg {
+  icon:    string;
+  label:   string;
+  labelMl: string;
+  badge:   string;  // tailwind classes for the header badge
+}
+
+const STEP_TYPE_CFG: Record<string, StepTypeCfg> = {
+  move:     { icon: "♟",  label: "The Move",   labelMl: "Move",           badge: "bg-emerald-900/70 text-emerald-200" },
+  tactic:   { icon: "⚔️", label: "Tactic",     labelMl: "Tactic",         badge: "bg-orange-800/80 text-orange-100 ring-1 ring-orange-500/60" },
+  threat:   { icon: "🎯", label: "Threat",     labelMl: "Threat",         badge: "bg-red-900/70 text-red-200" },
+  strategy: { icon: "🧠", label: "Strategy",   labelMl: "Strategy",       badge: "bg-purple-900/70 text-purple-200" },
+  plan:     { icon: "🗺️", label: "Your Plan",  labelMl: "ഇനി Plan",       badge: "bg-blue-900/70 text-blue-200" },
+  warning:  { icon: "⚠️", label: "Watch Out!", labelMl: "സൂക്ഷിക്കൂ!",   badge: "bg-yellow-900/70 text-yellow-200" },
+};
+
+// Tactic keyword → display name (for the callout inside tactic steps)
+const TACTIC_NAMES: [RegExp, string][] = [
+  [/fork/i,             "Fork ⚔️"],
+  [/discovered check/i, "Discovered Check 💥"],
+  [/discovered attack/i,"Discovered Attack 💥"],
+  [/pin/i,              "Pin 📌"],
+  [/skewer/i,           "Skewer 🎯"],
+  [/back.?rank/i,       "Back Rank 🏠"],
+  [/sacrifice/i,        "Sacrifice 🎭"],
+  [/overload/i,         "Overloading 🔥"],
+  [/double attack/i,    "Double Attack ⚔️"],
+  [/x.?ray/i,           "X-Ray 🔍"],
+  [/check/i,            "Check ⚡"],
+];
+
+function extractTacticName(text: string): string | null {
+  for (const [re, name] of TACTIC_NAMES) {
+    if (re.test(text)) return name;
+  }
+  return null;
+}
+
+function inferStepLabel(label: string | undefined, idx: number, total: number): string {
+  if (label && STEP_TYPE_CFG[label]) return label;
+  if (idx === 0) return "move";
+  if (idx === total - 1) return "plan";
+  return "strategy";
+}
+
 // TTS speed options
 const SPEEDS = [
   { label: "0.7×", rate: 0.7 },
   { label: "1×",   rate: 1.0 },
   { label: "1.3×", rate: 1.3 },
 ];
-const SPEED_KEY = "cm_tts_speed";
 
 // ── Slide: Why This Move (ONE AT A TIME, STRUCTURED STEPS) ────────────────────
 
@@ -208,6 +255,8 @@ function WhySlide({ analysis, from, to, onAnnotate, langCode, playTrigger, onPla
       }));
   const total = steps.length;
 
+  const { ttsRate, setTtsRate } = usePreferencesStore();
+
   const [active,      setActive]      = useState(0);
   const [playing,     setPlaying]     = useState(false);
   const [dir,         setDir]         = useState(1);
@@ -216,16 +265,10 @@ function WhySlide({ analysis, from, to, onAnnotate, langCode, playTrigger, onPla
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem("cm_tts_voice_name") ?? "";
   });
-  const [speed, setSpeed] = useState<number>(() => {
-    if (typeof window === "undefined") return 1.0;
-    return parseFloat(localStorage.getItem(SPEED_KEY) ?? "1.0") || 1.0;
-  });
-  const stopRef = useRef(false);
+  const speed    = ttsRate;
+  const stopRef  = useRef(false);
 
-  const saveSpeed = (r: number) => {
-    setSpeed(r);
-    if (typeof window !== "undefined") localStorage.setItem(SPEED_KEY, String(r));
-  };
+  const saveSpeed = (r: number) => { setTtsRate(r); };
   const handleVoiceSelect = (voiceId: string, name: string) => {
     setVoiceName(name);
     if (typeof window !== "undefined") window.localStorage.setItem("cm_tts_voice_name", name);
@@ -309,6 +352,9 @@ function WhySlide({ analysis, from, to, onAnnotate, langCode, playTrigger, onPla
   const step = steps[active]!;
   const dominantColor = step.arrows?.[0]?.[2] ?? step.squares?.[0]?.[1] ?? "green";
   const isLastStep    = active === total - 1;
+  const stepLabel     = inferStepLabel((step as {label?: string}).label, active, total);
+  const stepTypeCfg   = STEP_TYPE_CFG[stepLabel] ?? STEP_TYPE_CFG.strategy;
+  const tacticName    = stepLabel === "tactic" ? extractTacticName(step.text_ml) : null;
 
   const stepSquares = [...new Set([
     ...(step.arrows  ?? []).map((a) => a[1]),
@@ -348,25 +394,75 @@ function WhySlide({ analysis, from, to, onAnnotate, langCode, playTrigger, onPla
             transition={{ duration: 0.18, ease: "easeOut" }}
             className={`rounded-2xl border-2 p-4 ${cfg.border}/60 bg-black/30`}
           >
-            {/* Step header */}
+            {/* Step header — step number + step-type badge */}
             <div className="mb-3 flex items-center gap-2">
               <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${cfg.dot}`}>
                 {active + 1}
               </div>
               <span className="text-xs text-gray-500">of {total}</span>
-              {/* "Your turn" badge on last step */}
-              {isLastStep
-                ? <span className="ml-auto rounded-full bg-yellow-900/60 px-2 py-0.5 text-xs font-semibold text-yellow-300">
-                    🎯 {langCode === "ml" ? "നിങ്ങളുടെ turn" : "Your turn!"}
-                  </span>
-                : <span className={`ml-auto rounded-full bg-black/30 px-2 py-0.5 text-xs font-medium ${COLOR_TEXT[dominantColor] ?? "text-gray-300"}`}>
-                    {COLOR_LABEL[dominantColor] ?? "📍"}
-                  </span>
-              }
+              {/* Step-type badge */}
+              <span className={`ml-auto flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${stepTypeCfg.badge}`}>
+                <span>{stepTypeCfg.icon}</span>
+                <span>{langCode === "ml" ? stepTypeCfg.labelMl : stepTypeCfg.label}</span>
+              </span>
             </div>
 
-            {/* Explanation text — larger for readability */}
-            <p className={`leading-relaxed text-white ${isLastStep ? "text-base font-medium" : "text-base"}`}>
+            {/* Tactic callout — shown only for "tactic" steps */}
+            {stepLabel === "tactic" && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.22 }}
+                className="mb-3 flex items-center gap-2.5 rounded-xl border border-orange-500/50 bg-gradient-to-r from-orange-950/60 to-orange-900/30 px-3 py-2"
+              >
+                <motion.span
+                  className="text-xl"
+                  animate={{ scale: [1, 1.25, 1, 1.15, 1] }}
+                  transition={{ duration: 0.7, ease: "easeInOut" }}
+                >⚔️</motion.span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
+                    {langCode === "ml" ? "Tactical Pattern" : "Tactical Pattern"}
+                  </p>
+                  {tacticName && (
+                    <p className="text-sm font-bold text-orange-200">{tacticName}</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Warning callout — for opponent context steps */}
+            {stepLabel === "warning" && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className="mb-3 flex items-center gap-2.5 rounded-xl border border-yellow-600/50 bg-gradient-to-r from-yellow-950/60 to-yellow-900/30 px-3 py-2"
+              >
+                <span className="text-xl">⚠️</span>
+                <p className="text-xs font-semibold text-yellow-300">
+                  {langCode === "ml" ? "Opponent-ന്റെ move — respond ചെയ്യൂ!" : "Opponent's move — you must respond!"}
+                </p>
+              </motion.div>
+            )}
+
+            {/* Plan hint — for plan steps */}
+            {stepLabel === "plan" && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className="mb-3 flex items-center gap-2 rounded-lg border border-blue-700/40 bg-blue-950/30 px-3 py-1.5"
+              >
+                <span className="text-base">🗺️</span>
+                <p className="text-xs font-semibold text-blue-300">
+                  {langCode === "ml" ? "ഇനി നിങ്ങളുടെ next plan:" : "Your next plan:"}
+                </p>
+              </motion.div>
+            )}
+
+            {/* Explanation text */}
+            <p className="leading-relaxed text-base text-white">
               {step.text_ml}
             </p>
 

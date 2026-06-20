@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +24,7 @@ class Settings(BaseSettings):
     # ---- Security ----
     SECRET_KEY: str = "change-me"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours — enough for a full session
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # Comma-separated list of allowed origins (parsed via the cors_origins
     # property). Kept as a plain str so pydantic-settings does not try to
@@ -37,8 +38,26 @@ class Settings(BaseSettings):
 
     # ---- Redis ----
     REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    # Celery URLs default to REDIS_URL if not set explicitly
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _fix_db_driver(cls, v: str) -> str:
+        """Railway Postgres gives postgresql:// — asyncpg needs postgresql+asyncpg://."""
+        if isinstance(v, str) and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
+    @model_validator(mode="after")
+    def _set_celery_defaults(self) -> "Settings":
+        """Fall back to REDIS_URL for Celery if explicit broker/backend not set."""
+        if not self.CELERY_BROKER_URL:
+            object.__setattr__(self, "CELERY_BROKER_URL", self.REDIS_URL)
+        if not self.CELERY_RESULT_BACKEND:
+            object.__setattr__(self, "CELERY_RESULT_BACKEND", self.REDIS_URL)
+        return self
 
     # ---- Stockfish ----
     STOCKFISH_PATH: str = "/usr/games/stockfish"
@@ -61,6 +80,11 @@ class Settings(BaseSettings):
 
     # ---- ElevenLabs TTS ----
     ELEVENLABS_API_KEY: str = ""
+
+    # ---- Google Cloud TTS (preferred for Indian languages — native Wavenet voices) ----
+    # Get from Google Cloud Console → APIs & Services → Credentials → API key
+    # Enable "Cloud Text-to-Speech API" for the project first.
+    GOOGLE_TTS_API_KEY: str = ""
 
     # ---- OAuth ----
     GOOGLE_CLIENT_ID: str = ""

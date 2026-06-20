@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useLanguageStore } from "@/store/language";
 import { motion, AnimatePresence } from "framer-motion";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
@@ -102,6 +103,7 @@ const PIECE_CARDS = [
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { setCode } = useLanguageStore();
   const [step, setStep] = useState<Step>("language");
   const [lang, setLang] = useState("en");
   const [experience, setExperience] = useState("");
@@ -112,10 +114,8 @@ export default function OnboardingPage() {
     const updated = updateStreak({ ...p, onboardingComplete: true });
     saveProgress(updated);
 
-    // Also save language preference
-    if (typeof window !== "undefined") {
-      localStorage.setItem("cm_language", lang);
-    }
+    // Save language preference to the Zustand store (persisted to localStorage)
+    setCode(lang);
 
     // Route to appropriate belt based on experience
     if (expId === "zero") {
@@ -133,7 +133,11 @@ export default function OnboardingPage() {
         <AnimatePresence mode="wait">
           {step === "language" && (
             <SlideIn key="language">
-              <LanguageStep selected={lang} onSelect={setLang} onNext={() => setStep("welcome")} />
+              <LanguageStep
+                selected={lang}
+                onSelect={(c) => { setLang(c); setCode(c); }}
+                onNext={() => setStep("welcome")}
+              />
             </SlideIn>
           )}
           {step === "welcome" && (

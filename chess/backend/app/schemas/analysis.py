@@ -27,9 +27,10 @@ class MoveAnalysisRequest(BaseModel):
     level: str = Field("beginner", pattern="^(guru|beginner|intermediate|advanced)$")
     language: str = Field("en", pattern=_LANG_PATTERN)
     depth: int | None = Field(None, ge=1, le=30)
-    # Opponent's previous move context — used to prepend 2 "why opponent played X" slides
+    # Previous move context — prepends 2 "what just happened" slides
     opponent_move_uci: str | None = Field(None, min_length=4, max_length=5)
-    opponent_fen: str | None = None  # FEN *before* opponent's move (enables capture detection)
+    opponent_fen: str | None = None  # FEN *before* the context move (enables capture detection)
+    context_move_by: str = Field("ai", pattern="^(ai|player)$")  # who made the context move
 
 
 class ChecklistItem(BaseModel):
@@ -42,6 +43,7 @@ class ExplanationStep(BaseModel):
     text_ml: str
     arrows: list[list[str]] = []   # [[from_sq, to_sq, color], ...]
     squares: list[list[str]] = []  # [[sq, color], ...]
+    label: str | None = None       # move | tactic | threat | strategy | plan | warning
 
 
 class MoveAnalysisResponse(BaseModel):
@@ -92,6 +94,28 @@ class GameReviewResponse(BaseModel):
     inaccuracies: int
     summary_ml: str | None
     moves: list[MoveReviewOut]
+
+
+class CandidateMovesRequest(BaseModel):
+    fen: str
+    language: str = Field("en", pattern=_LANG_PATTERN)
+    level: str = Field("guru", pattern="^(guru|beginner|intermediate|advanced)$")
+
+
+class CandidateMoveItem(BaseModel):
+    move_san: str
+    move_uci: str
+    name: str
+    short_reason: str
+    pros: list[str]
+    cons: list[str]
+    style: str  # aggressive | solid | creative
+
+
+class CandidateMovesResponse(BaseModel):
+    opening_name: str | None = None
+    opening_tip: str | None = None
+    candidates: list[CandidateMoveItem]
 
 
 class ExplainRequest(BaseModel):

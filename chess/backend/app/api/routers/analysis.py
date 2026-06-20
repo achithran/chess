@@ -7,6 +7,8 @@ from app.api.deps import enforce_daily_analysis_quota
 from app.schemas.analysis import (
     BestMoveRequest,
     BestMoveResponse,
+    CandidateMovesRequest,
+    CandidateMovesResponse,
     EvaluateRequest,
     EvaluateResponse,
     ExplainRequest,
@@ -24,6 +26,7 @@ from app.services.ai_explanation import (
     ai_explanation_service,
 )
 from app.services.analysis_service import analysis_service
+from app.services.candidate_service import candidate_service
 from app.services.stockfish_service import stockfish_service
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -75,6 +78,7 @@ async def analyze_move(
             language=body.language,
             opponent_move_uci=body.opponent_move_uci,
             opponent_fen=body.opponent_fen,
+            context_move_by=body.context_move_by,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -91,6 +95,7 @@ async def analyze_move(
                 text_ml=s["text"],
                 arrows=s.get("arrows", []),
                 squares=s.get("squares", []),
+                label=s.get("label"),
             )
             for s in review.explanation_steps
         ],
@@ -98,6 +103,17 @@ async def analyze_move(
         threats=review.threats,
         checklist=review.checklist,
     )
+
+
+@router.post("/candidates", response_model=CandidateMovesResponse)
+async def get_candidates(
+    body: CandidateMovesRequest,
+    _user: object = Depends(enforce_daily_analysis_quota),
+):
+    """Return 3 candidate moves for the current position (Guru Mode 'What should I play?')."""
+    _validate_fen(body.fen)
+    result = await candidate_service.get_candidates(body.fen, body.language, body.level)
+    return CandidateMovesResponse(**result)
 
 
 @router.post("/explain", response_model=ExplainResponse)
