@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Brain, ChevronDown, ChevronUp, Globe, KeyRound, Palette,
-  Shield, Trash2, User, Volume2,
+  Brain, CheckCircle2, ChevronDown, ChevronUp, Globe, KeyRound,
+  Palette, Shield, Trash2, User, Volume2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { LANGUAGES, useLanguageStore } from "@/store/language";
@@ -13,11 +13,11 @@ import { VoicePicker } from "@/components/voice-picker";
 import { api } from "@/lib/api";
 
 const DIFFICULTIES = [
-  { label: "Guru",         ml: "ഗുരു",       color: "text-purple-400" },
-  { label: "Beginner",     ml: "Beginner",   color: "text-emerald-400" },
-  { label: "Intermediate", ml: "Intermediate",color: "text-yellow-400" },
-  { label: "Advanced",     ml: "Advanced",   color: "text-orange-400" },
-  { label: "Master",       ml: "Master",     color: "text-red-400" },
+  { label: "Guru",         ml: "ഗുരു",        color: "text-purple-400" },
+  { label: "Beginner",     ml: "Beginner",    color: "text-emerald-400" },
+  { label: "Intermediate", ml: "Intermediate", color: "text-yellow-400" },
+  { label: "Advanced",     ml: "Advanced",    color: "text-orange-400" },
+  { label: "Master",       ml: "Master",      color: "text-red-400" },
 ];
 
 const TTS_SPEEDS = [
@@ -91,7 +91,7 @@ export default function SettingsPage() {
   const { isAuthenticated, logout } = useAuthStore();
   const router = useRouter();
 
-  const { code, setCode }        = useLanguageStore();
+  const { code, setCode } = useLanguageStore();
   const {
     defaultDifficulty, setDefaultDifficulty,
     autoPlayTts,       setAutoPlayTts,
@@ -102,6 +102,17 @@ export default function SettingsPage() {
     displayName,       setDisplayName,
   } = usePreferencesStore();
 
+  // ── Staged settings — only written to stores when Save is pressed ──────────
+  const [stagedLang,        setStagedLang]        = useState(code);
+  const [stagedDifficulty,  setStagedDifficulty]  = useState(defaultDifficulty);
+  const [stagedAutoTts,     setStagedAutoTts]      = useState(autoPlayTts);
+  const [stagedTtsRate,     setStagedTtsRate]      = useState(ttsRate);
+  const [stagedTheme,       setStagedTheme]        = useState<BoardTheme>(boardTheme);
+  const [stagedLegalHints,  setStagedLegalHints]   = useState(showLegalHints);
+  const [stagedWhiteBottom, setStagedWhiteBottom]  = useState(alwaysWhiteBottom);
+
+  const [saved, setSaved] = useState(false);
+
   // Voice picker
   const [voicePicker, setVoicePicker] = useState(false);
   const [voiceName, setVoiceName] = useState<string>(() => {
@@ -110,9 +121,9 @@ export default function SettingsPage() {
   });
 
   // Account section state
-  const [nameInput,   setNameInput]   = useState(displayName);
-  const [nameSaving,  setNameSaving]  = useState(false);
-  const [nameMsg,     setNameMsg]     = useState<string | null>(null);
+  const [nameInput,  setNameInput]  = useState(displayName);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameMsg,    setNameMsg]    = useState<string | null>(null);
 
   const [curPw,  setCurPw]  = useState("");
   const [newPw,  setNewPw]  = useState("");
@@ -142,12 +153,25 @@ export default function SettingsPage() {
 
   if (!isAuthenticated) return null;
 
-  const selectedLang = LANGUAGES.find((l) => l.code === code) ?? LANGUAGES[0];
+  const selectedLang = LANGUAGES.find((l) => l.code === stagedLang) ?? LANGUAGES[0];
 
   const handleVoiceSelect = (_voiceId: string, name: string) => {
     setVoiceName(name);
     if (typeof window !== "undefined") window.localStorage.setItem("cm_tts_voice_name", name);
     setVoicePicker(false);
+  };
+
+  // Apply all staged settings to stores, then navigate to /play
+  const handleSave = () => {
+    setCode(stagedLang);
+    setDefaultDifficulty(stagedDifficulty);
+    setAutoPlayTts(stagedAutoTts);
+    setTtsRate(stagedTtsRate);
+    setBoardTheme(stagedTheme);
+    setShowLegalHints(stagedLegalHints);
+    setAlwaysWhiteBottom(stagedWhiteBottom);
+    setSaved(true);
+    setTimeout(() => router.push("/play"), 700);
   };
 
   const saveName = async () => {
@@ -191,12 +215,12 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="container-px py-10">
+    <div className="container-px py-10 pb-32">
       <div className="mx-auto max-w-lg space-y-5">
 
         <div>
           <h1 className="text-2xl font-bold text-white">Settings</h1>
-          <p className="mt-1 text-sm text-gray-400">Manage your preferences and account</p>
+          <p className="mt-1 text-sm text-gray-400">Choose your preferences, then tap Save to apply them.</p>
         </div>
 
         {/* ── 1. Coaching Preferences ─────────────────────────────────────── */}
@@ -211,14 +235,14 @@ export default function SettingsPage() {
               {DIFFICULTIES.map((d, i) => (
                 <button
                   key={d.label}
-                  onClick={() => setDefaultDifficulty(i)}
+                  onClick={() => setStagedDifficulty(i)}
                   className={`rounded-lg border px-2 py-2.5 text-xs transition ${
-                    defaultDifficulty === i
+                    stagedDifficulty === i
                       ? "border-brand bg-brand/15 text-white"
                       : "border-surface-border text-gray-400 hover:text-white"
                   }`}
                 >
-                  <span className={`block font-semibold ${defaultDifficulty === i ? "text-white" : d.color}`}>
+                  <span className={`block font-semibold ${stagedDifficulty === i ? "text-white" : d.color}`}>
                     {d.label}
                   </span>
                 </button>
@@ -229,8 +253,8 @@ export default function SettingsPage() {
           <ToggleRow
             label="Auto-play voice in Guru Mode"
             sub="Guru automatically reads the explanation aloud after every AI move"
-            value={autoPlayTts}
-            onChange={setAutoPlayTts}
+            value={stagedAutoTts}
+            onChange={setStagedAutoTts}
           />
 
           <div>
@@ -239,9 +263,9 @@ export default function SettingsPage() {
               {TTS_SPEEDS.map((s) => (
                 <button
                   key={s.rate}
-                  onClick={() => setTtsRate(s.rate)}
+                  onClick={() => setStagedTtsRate(s.rate)}
                   className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
-                    ttsRate === s.rate
+                    stagedTtsRate === s.rate
                       ? "border-brand bg-brand/15 text-white"
                       : "border-surface-border text-gray-400 hover:border-gray-500 hover:text-white"
                   }`}
@@ -262,21 +286,20 @@ export default function SettingsPage() {
               {(Object.entries(BOARD_THEMES) as [BoardTheme, typeof BOARD_THEMES[BoardTheme]][]).map(([key, t]) => (
                 <button
                   key={key}
-                  onClick={() => setBoardTheme(key)}
+                  onClick={() => setStagedTheme(key)}
                   className={`group flex flex-col items-center gap-1.5 rounded-xl border p-2 transition ${
-                    boardTheme === key
+                    stagedTheme === key
                       ? "border-brand bg-brand/10"
                       : "border-surface-border hover:border-gray-500"
                   }`}
                 >
-                  {/* Mini board preview */}
                   <div className="grid grid-cols-2 overflow-hidden rounded-md" style={{ width: 36, height: 36 }}>
                     <div style={{ background: t.light }} />
                     <div style={{ background: t.dark  }} />
                     <div style={{ background: t.dark  }} />
                     <div style={{ background: t.light }} />
                   </div>
-                  <span className={`text-[10px] font-medium ${boardTheme === key ? "text-white" : "text-gray-500"}`}>
+                  <span className={`text-[10px] font-medium ${stagedTheme === key ? "text-white" : "text-gray-500"}`}>
                     {t.name}
                   </span>
                 </button>
@@ -287,15 +310,15 @@ export default function SettingsPage() {
           <ToggleRow
             label="Show legal move hints"
             sub="Highlight valid squares when you pick up a piece"
-            value={showLegalHints}
-            onChange={setShowLegalHints}
+            value={stagedLegalHints}
+            onChange={setStagedLegalHints}
           />
 
           <ToggleRow
             label="Always play as White"
             sub="Board stays White-at-bottom even in vs-Friend mode"
-            value={alwaysWhiteBottom}
-            onChange={setAlwaysWhiteBottom}
+            value={stagedWhiteBottom}
+            onChange={setStagedWhiteBottom}
           />
         </Section>
 
@@ -308,9 +331,9 @@ export default function SettingsPage() {
             {LANGUAGES.map((l) => (
               <button
                 key={l.code}
-                onClick={() => setCode(l.code)}
+                onClick={() => setStagedLang(l.code)}
                 className={`rounded-xl border px-3.5 py-2 text-sm font-medium transition ${
-                  code === l.code
+                  stagedLang === l.code
                     ? "border-brand bg-brand/15 text-white"
                     : "border-surface-border text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 }`}
@@ -320,7 +343,7 @@ export default function SettingsPage() {
             ))}
           </div>
           <p className="text-xs text-gray-500">
-            Currently: <span className="font-semibold text-gray-300">{selectedLang.name}</span>
+            Selected: <span className="font-semibold text-gray-300">{selectedLang.name}</span>
           </p>
         </Section>
 
@@ -345,7 +368,6 @@ export default function SettingsPage() {
         {/* ── 5. Account & Profile ────────────────────────────────────────── */}
         <Section icon={<User className="h-4 w-4" />} title="Account & Profile" defaultOpen={false}>
 
-          {/* Display name */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-gray-300">Display Name</p>
             <div className="flex gap-2">
@@ -370,7 +392,6 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* Change password */}
           <div className="space-y-2 border-t border-surface-border pt-4">
             <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
               <KeyRound className="h-4 w-4 text-gray-500" />
@@ -401,7 +422,6 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          {/* Danger zone */}
           <div className="space-y-3 rounded-xl border border-red-900/50 bg-red-950/20 p-4">
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-red-400" />
@@ -449,15 +469,26 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-      {/* ── Save button ─────────────────────────────────────────────────── */}
-      <div className="sticky bottom-0 bg-surface-card/90 backdrop-blur border-t border-surface-border px-4 py-3 flex items-center justify-between gap-4">
-        <p className="text-xs text-gray-500">Settings are saved automatically.</p>
-        <button
-          onClick={() => router.push("/play")}
-          className="btn-primary px-6 py-2 text-sm"
-        >
-          Save &amp; Play →
-        </button>
+      </div>
+
+      {/* ── Sticky Save bar ─────────────────────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-surface-border bg-surface-card/95 backdrop-blur px-4 py-3">
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-4">
+          {saved ? (
+            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" /> Settings saved! Returning to game…
+            </span>
+          ) : (
+            <span className="text-xs text-gray-500">Changes apply when you tap Save.</span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saved}
+            className="btn-primary px-8 py-2.5 text-sm font-semibold disabled:opacity-60"
+          >
+            {saved ? "Saved ✓" : "Save Settings"}
+          </button>
+        </div>
       </div>
     </div>
   );
