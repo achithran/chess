@@ -57,7 +57,16 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error("unhandled_exception", path=request.url.path, error=str(exc))
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in settings.cors_origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers=headers,
+    )
 
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
