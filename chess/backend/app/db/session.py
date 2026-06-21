@@ -14,10 +14,13 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    connect_args={"statement_cache_size": 0},
+    pool_pre_ping=False,
+    pool_size=5,
+    max_overflow=10,
+    connect_args={
+        "statement_cache_size": 0,
+        "ssl": "require",
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(
