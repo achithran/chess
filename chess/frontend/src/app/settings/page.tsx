@@ -449,6 +449,15 @@ export default function SettingsPage() {
           </div>
         </Section>
 
+      {/* ── Save button ─────────────────────────────────────────────────── */}
+      <div className="sticky bottom-0 bg-surface-card/90 backdrop-blur border-t border-surface-border px-4 py-3 flex items-center justify-between gap-4">
+        <p className="text-xs text-gray-500">Settings are saved automatically.</p>
+        <button
+          onClick={() => router.push("/play")}
+          className="btn-primary px-6 py-2 text-sm"
+        >
+          Save &amp; Play →
+        </button>
       </div>
     </div>
   );
