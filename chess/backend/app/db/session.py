@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -14,8 +13,10 @@ from app.core.config import settings
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    poolclass=NullPool,
-    connect_args={"statement_cache_size": 0},
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
 )
 
 AsyncSessionLocal = async_sessionmaker(
